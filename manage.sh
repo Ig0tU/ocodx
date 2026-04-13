@@ -803,8 +803,40 @@ PYEOF
 CMD="${1:-}"
 cd "$SCRIPT_DIR"
 
+# Interaction: Choose deployment method
+prompt_setup() {
+    clear
+    echo -e "${BOLD}${CYAN}⬡ OCODX — Sovereign Liquid Matrix (SLM-v3)${RESET}"
+    echo -e "Choose your preferred deployment method:\n"
+    echo -e "  ${BOLD}1)${RESET} ${BOLD}Standard Local Setup${RESET} (Native macOS/Linux, faster UI, direct access)"
+    echo -e "  ${BOLD}2)${RESET} ${BOLD}Docker Deployment${RESET}   (Clean, containerized, easy cleanup)\n"
+    
+    read -rp "Select [1-2, default=1]: " choice
+    case "$choice" in
+        2) 
+            info "Initializing Docker Deployment..."
+            if [ ! -f .env ]; then
+                cp .env.example .env
+                info "Created .env from template. Edit it for custom AI keys."
+            fi
+            docker-compose up -d --build
+            success "OCODX is launching in Docker at http://localhost:8000"
+            touch "$SCRIPT_DIR/.docker_selected"
+            exit 0
+            ;;
+        *) 
+            info "Proceeding with Standard Local Setup..."
+            # Continue to default local install/run logic
+            ;;
+    esac
+}
+
 # Smart default: if no arg given, install if needed then launch
 if [[ -z "$CMD" ]]; then
+    if [[ ! -d "$VENV" ]] && [[ ! -f "$SCRIPT_DIR/.docker_selected" ]]; then
+        prompt_setup
+    fi
+    
     if ! venv_is_healthy 2>/dev/null || [[ ! -f "$SCRIPT_DIR/src/open_codex/static/index.html" ]]; then
         echo -e "\n${BOLD}${CYAN}OCODX — First run detected. Running install …${RESET}\n"
         cmd_install
@@ -816,6 +848,10 @@ fi
 case "$CMD" in
     install) cmd_install ;;
     web)     cmd_web ;;
+    docker)  
+        info "Running in Docker..."
+        docker-compose up -d --build
+        ;;
     stop)    cmd_stop ;;
     test)    cmd_test ;;
     build)   cmd_build ;;
@@ -828,6 +864,7 @@ case "$CMD" in
         echo -e "${BOLD}OCODX — OpenCodex Desktop App  (manage.sh)${RESET}"
         echo ""
         echo -e "  ${CYAN}./manage.sh${RESET}           Smart default: install if needed, then launch"
+        echo -e "  ${CYAN}./manage.sh docker${RESET}    Launch the full stack in Docker"
         echo -e "  ${CYAN}./manage.sh install${RESET}   Full install: venv, Python deps, npm, frontend, icon"
         echo -e "  ${CYAN}./manage.sh web${RESET}       Start API server + open browser"
         echo -e "  ${CYAN}./manage.sh stop${RESET}      Stop a running server"
