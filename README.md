@@ -82,6 +82,25 @@ Install dependencies and start the app:
 
 ---
 
+## 🐳 Docker Deployment
+
+For a clean, containerized experience, OCODX can be deployed using Docker.
+
+### 1. Configure your environment
+Copy the example environment file and fill in your AI provider keys:
+```bash
+cp .env.example .env
+```
+
+### 2. Launch the Matrix
+```bash
+docker-compose up -d --build
+```
+
+OCODX will be available at `http://localhost:8000`. All your projects, threads, and matrix states will be persisted in the `ocodx_data` volume.
+
+---
+
 ## 🛡️ Security Notice
 
 All actions are executed **only after your explicit confirmation** in the OCODX UI. No data is sent to the cloud unless you explicitly use a cloud-based provider (Gemini/Ollama Cloud).

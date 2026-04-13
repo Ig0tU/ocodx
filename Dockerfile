@@ -1,23 +1,28 @@
 # ============================================================================
-#  Open Codex — Full-suite Docker image
-#  Stage 1: Build frontend (Node/Vite → static assets)
-#  Stage 2: Python runtime  (FastAPI + uvicorn + ALL optional deps)
+#  OCODX — Full-suite Sovereign Liquid Matrix (SLM-v3) Docker Image
+#
+#  Stage 1: Build Frontend (React/Vite → Static Assets)
+#  Stage 2: Runtime (FastAPI + SLM-v3 Matrix + MCP Toolset + AionUI)
 # ============================================================================
 
-# ── Stage 1: Frontend ────────────────────────────────────────────────────────
-FROM node:22-alpine AS frontend
+# ── Stage 1: Frontend Build ───────────────────────────────────────────────────
+FROM node:22-alpine AS frontend-builder
 
 WORKDIR /build
+# Cache node_modules using package.json
 COPY src/open_codex/frontend/package.json src/open_codex/frontend/package-lock.json* ./
 RUN npm ci 2>/dev/null || npm install
+
+# Build the assets
 COPY src/open_codex/frontend/ ./
 RUN npm run build
-# vite outDir '../static' relative to /build → output at /static
+# Vite outDir '../static' results in output at /static relative to /build/src/open_codex/frontend
+# But since we are in /build, and the config says '../static', it will be in /static.
 
-# ── Stage 2: Runtime ─────────────────────────────────────────────────────────
+# ── Stage 2: Python Runtime ───────────────────────────────────────────────────
 FROM python:3.12-slim
 
-# System deps for native extensions (llama-cpp, torch, playwright, etc.)
+# System dependencies for AionUI (Playwright), Llama-cpp, and CMS operations
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         cmake \
@@ -45,32 +50,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libcairo2 \
         libasound2 \
         libatspi2.0-0 \
+        xvfb \
     && rm -rf /var/lib/apt/lists/*
+
+# Install UV for high-speed dependency orchestration
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
-# ── Open Codex core ──────────────────────────────────────────────────────────
-COPY pyproject.toml ./
-COPY src/ ./src/
+# ── OCODX Core Installation ──────────────────────────────────────────────────
+COPY pyproject.toml uv.lock ./
 COPY README.md ./
 
-RUN pip install --no-cache-dir setuptools wheel && \
-    pip install --no-cache-dir ".[test]"
+# Install core dependencies using uv
+RUN uv pip install --system --no-cache .
 
-# ── Optional extras (all baked in) ───────────────────────────────────────────
-RUN pip install --no-cache-dir \
+# ── Optional Extra Dependencies ──────────────────────────────────────────────
+RUN uv pip install --system --no-cache \
         mysql-connector-python \
         google-genai \
         pyperclip \
         httpx \
         playwright
 
-# Playwright Chromium browser binary
-RUN python -m playwright install chromium
+# Install AionUI Browser (Playwright Chromium)
+RUN uv run playwright install --with-deps chromium
 
-# ── Joomla MCP companion deps ───────────────────────────────────────────────
+# ── Joomla MCP & SLM Matrix Companion ────────────────────────────────────────
 COPY joomcpla-main/ ./joomcpla-main/
-RUN pip install --no-cache-dir \
+RUN uv pip install --system --no-cache \
         black \
         bleach \
         markdown \
@@ -80,21 +88,31 @@ RUN pip install --no-cache-dir \
         tokenizers \
         torch --index-url https://download.pytorch.org/whl/cpu
 
-# Install joomcpla as a package if it has a pyproject.toml
+# Install joomcpla as a local package if available
 RUN if [ -f joomcpla-main/pyproject.toml ]; then \
-        pip install --no-cache-dir ./joomcpla-main 2>/dev/null || true; \
+        uv pip install --system --no-cache ./joomcpla-main 2>/dev/null || true; \
     fi
 
-# ── Built frontend overlay ──────────────────────────────────────────────────
-COPY --from=frontend /static/ ./src/open_codex/static/
+# ── Final Assembly ───────────────────────────────────────────────────────────
+# Copy the actual source code
+COPY src/ ./src/
+
+# Overlay the built frontend static assets
+COPY --from=frontend-builder /static/ ./src/open_codex/static/
+
+# Persistence mapping for projects and threads
+ENV HOME=/root
+RUN mkdir -p /root/.open_codex
 
 EXPOSE 8000
 
 ENV PYTHONUNBUFFERED=1
 
-# Labels for registry
-LABEL org.opencontainers.image.title="open-codex"
-LABEL org.opencontainers.image.description="AI CLI with OSS LLM integration — full suite"
+# OCODX Metadata
+LABEL org.opencontainers.image.title="OCODX"
+LABEL org.opencontainers.image.description="Sovereign Liquid Matrix (SLM-v3) Autonomous AI Engine"
+LABEL org.opencontainers.image.vendor="AionUI"
 LABEL org.opencontainers.image.version="0.1.18"
 
+# Start the OCODX API Server
 CMD ["python", "-m", "uvicorn", "open_codex.api:app", "--host", "0.0.0.0", "--port", "8000"]

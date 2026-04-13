@@ -1,42 +1,34 @@
 version: "3.9"
 
 services:
-  open-codex:
+  ocodx:
     build: .
-    container_name: open-codex
+    container_name: ocodx-slm-matrix
+    image: ocodx:latest
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
-      # ── LLM Provider config (uncomment / fill as needed) ──
-      # Ollama local — point to host machine's Ollama daemon
-      # OLLAMA_HOST: http://host.docker.internal:11434
-      #
-      # Ollama Cloud
-      # OLLAMA_API_KEY: ""
-      #
-      # LM Studio — point to host machine's LM Studio server
-      # LMSTUDIO_HOST: http://host.docker.internal:1234
-      #
-      # Gemini
-      # GEMINI_API_KEY: ""
-      #
-      # Joomla MCP (optional)
-      # JOOMLA_BASE_URL: ""
-      # JOOMLA_BEARER_TOKEN: ""
-      # JOOMLA_AI_PROVIDER: gemini
-      #
-      # YOO Builder MySQL (optional)
-      # YOOMYSQL_HOST: ""
-      # YOOMYSQL_USER: ""
-      # YOOMYSQL_PASSWORD: ""
-      # YOOMYSQL_DATABASE: ""
+      # These can be overridden in .env
       PYTHONUNBUFFERED: "1"
+      # For AionUI Browser (AI on UI)
+      PLAYWRIGHT_HEADLESS: "true"
+    volumes:
+      # Persist OCODX projects, threads, and matrix states
+      - ocodx_data:/root/.open_codex
+      # Optional: Mount your local workspace for OCODX to work on
+      # - .:/workspace
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8000/docs"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/config"]
       interval: 30s
-      timeout: 5s
+      timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 30s
+
+volumes:
+  ocodx_data:
+    driver: local
