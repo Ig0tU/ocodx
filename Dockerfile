@@ -20,7 +20,7 @@ RUN npm run build
 # But since we are in /build, and the config says '../static', it will be in /static.
 
 # ── Stage 2: Python Runtime ───────────────────────────────────────────────────
-FROM python:3.12-slim
+FROM python:3.13-slim
 
 # System dependencies for AionUI (Playwright), Llama-cpp, and CMS operations
 RUN apt-get update && apt-get install -y --no-install-recommends \
