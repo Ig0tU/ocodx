@@ -1,0 +1,111 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* Dark Glassmorphism Core Palette */
+  --bg:         #07070f;
+  --bg-2:       #0d0d1a;
+  --bg-3:       #121224;
+  --bg-4:       #1a1a30;
+  --bg-glass:   rgba(13, 13, 26, 0.85);
+  --bg-glass-2: rgba(18, 18, 36, 0.7);
+
+  /* Borders */
+  --border:     rgba(255, 255, 255, 0.06);
+  --border-2:   rgba(255, 255, 255, 0.1);
+  --border-glow: rgba(139, 92, 246, 0.3);
+
+  /* Text */
+  --text:     #f0f0ff;
+  --text-2:   #a0a0c0;
+  --text-3:   #5a5a80;
+
+  /* Accent — electric violet */
+  --accent:    hsl(262, 83%, 65%);
+  --accent-2:  hsl(262, 83%, 55%);
+  --accent-glow: rgba(139, 92, 246, 0.25);
+
+  /* Semantic */
+  --green:     #34d399;
+  --red:       #f87171;
+  --blue:      #60a5fa;
+  --amber:     #fbbf24;
+  --teal:      #2dd4bf;
+
+  /* Cluster hues (HSL) — one per SLM cluster */
+  --hsl-arc:  262; /* violet — Architecture Core */
+  --hsl-lng:  195; /* cyan — Language Excellence */
+  --hsl-cld:  210; /* blue — Cloud */
+  --hsl-ops:  160; /* green — Operations */
+  --hsl-aid:  285; /* purple — AI & Data */
+  --hsl-qsp:  0;   /* red — Quality */
+  --hsl-bus:  38;  /* amber — Business */
+  --hsl-rev:  22;  /* orange — Revenue */
+  --hsl-leg:  170; /* teal — Legacy */
+  --hsl-eng:  245; /* indigo — Engineering */
+  --hsl-dat:  200; /* sky — Data */
+  --hsl-rel:  142; /* emerald — Reliability */
+  --hsl-grw:  330; /* pink — Growth */
+  --hsl-gov:  52;  /* yellow — Governance */
+  --hsl-pst:  300; /* fuchsia — Product */
+  --hsl-exp:  320; /* rose — Experience */
+
+  /* Radii */
+  --radius:    8px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  /* Fonts */
+  --mono: 'JetBrains Mono', 'Cascadia Code', ui-monospace, 'SF Mono', monospace;
+  --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+
+html, body, #root { height: 100%; overflow: hidden; }
+
+body {
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+button { cursor: pointer; font-family: inherit; font-size: inherit; background: none; border: none; }
+input, textarea, select { font-family: inherit; font-size: inherit; }
+pre, code { font-family: var(--mono); }
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(139, 92, 246, 0.25); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(139, 92, 246, 0.4); }
+
+/* Aurora background animation */
+@keyframes aurora {
+  0%, 100% { background-position: 0% 50%; }
+  50%       { background-position: 100% 50%; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
+  50%       { box-shadow: 0 0 20px 4px var(--accent-glow); }
+}
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@keyframes shimmer {
+  from { background-position: -200% center; }
+  to   { background-position: 200% center; }
+}
+
+@keyframes cellPop {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}

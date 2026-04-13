@@ -1,0 +1,48 @@
+[project]
+name = "open_codex"
+version = "0.1.18"
+description = "AI CLI with OSS LLM integration"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.135.3",
+    "huggingface-hub>=0.30.2",
+    "llama-cpp-python>=0.3.8",
+    "ollama>=0.4.8",
+    "playwright>=1.46",
+    "pillow>=10.0",
+    "prompt_toolkit",
+    "pydantic>=2.11.4",
+    "pyinstaller>=6.13.0",
+    "pyperclip>=1.9.0",
+    "python-multipart>=0.0.24",
+    "uvicorn>=0.44.0",
+    "google-genai>=1.0.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+    "anyio[trio]>=4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[project.scripts]
+open-codex = "open_codex.main:main"
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"open_codex" = ["resources/*.txt", "static/**/*", "static/*"]
