@@ -61,6 +61,7 @@ WORKDIR /app
 # ── OCODX Core Installation ──────────────────────────────────────────────────
 COPY pyproject.toml uv.lock ./
 COPY README.md ./
+COPY src/ ./src/
 
 # Install core dependencies using uv
 RUN uv pip install --system --no-cache .
@@ -94,8 +95,7 @@ RUN if [ -f joomcpla-main/pyproject.toml ]; then \
     fi
 
 # ── Final Assembly ───────────────────────────────────────────────────────────
-# Copy the actual source code
-COPY src/ ./src/
+# Source code already copied above for core installation
 
 # Overlay the built frontend static assets
 COPY --from=frontend-builder /static/ ./src/open_codex/static/
