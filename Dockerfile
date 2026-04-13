@@ -120,6 +120,7 @@ ENV PLAYWRIGHT_HEADLESS=true
 # OCODX Metadata
 LABEL org.opencontainers.image.title="OCODX"
 LABEL org.opencontainers.image.description="Sovereign Liquid Matrix (SLM-v3) Autonomous AI Engine"
+LABEL org.opencontainers.image.source="https://github.com/Ig0tU/ocodx"
 LABEL org.opencontainers.image.vendor="AionUI"
 LABEL org.opencontainers.image.version="0.1.18"
 
