@@ -108,6 +108,15 @@ EXPOSE 8000
 
 ENV PYTHONUNBUFFERED=1
 
+# ── AI Provider Defaults ──
+ENV AI_PROVIDER=ollama
+ENV OLLAMA_HOST=http://host.docker.internal:11434
+ENV OLLAMA_MODEL=llama3
+ENV LMSTUDIO_HOST=http://host.docker.internal:1234
+ENV LMSTUDIO_MODEL=local-model
+ENV GEMINI_MODEL=gemini-2.0-flash
+ENV PLAYWRIGHT_HEADLESS=true
+
 # OCODX Metadata
 LABEL org.opencontainers.image.title="OCODX"
 LABEL org.opencontainers.image.description="Sovereign Liquid Matrix (SLM-v3) Autonomous AI Engine"

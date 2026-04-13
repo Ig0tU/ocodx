@@ -86,8 +86,8 @@ Install dependencies and start the app:
 
 For a clean, containerized experience, OCODX can be deployed using Docker.
 
-### 1. Configure your environment
-Copy the example environment file and fill in your AI provider keys:
+### 1. Configure your environment (Optional)
+OCODX comes with sensible defaults. If you want to use Cloud providers (Gemini/Ollama Cloud) or customize hosts, create a `.env` file:
 ```bash
 cp .env.example .env
 ```
