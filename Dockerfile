@@ -87,7 +87,7 @@ RUN uv pip install --system --no-cache \
         google-generativeai \
         transformers \
         tokenizers \
-        torch --index-url https://download.pytorch.org/whl/cpu
+        torch --extra-index-url https://download.pytorch.org/whl/cpu
 
 # Install joomcpla as a local package if available
 RUN if [ -f joomcpla-main/pyproject.toml ]; then \
