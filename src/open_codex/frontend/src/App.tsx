@@ -243,6 +243,9 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([])
   const [activeProject, setActiveProject] = useState<Project | null>(null)
 
+  // Agent configuration
+  const [maxSteps, setMaxSteps] = useState<number>(() => store('oc_max_steps', 25))
+
   // Threads
   const [threads, setThreads] = useState<Thread[]>([])
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
@@ -349,6 +352,7 @@ export default function App() {
   useEffect(() => { storeSet('oc_geminikey', geminiApiKey) }, [geminiApiKey])
   useEffect(() => { storeSet('oc_lmhost', lmHost) }, [lmHost])
   useEffect(() => { storeSet('oc_ollamahost', ollamaHost) }, [ollamaHost])
+  useEffect(() => { storeSet('oc_max_steps', maxSteps) }, [maxSteps])
 
   const urlPromptRef = useRef<string | null>(new URLSearchParams(window.location.search).get('prompt'))
 
@@ -660,6 +664,7 @@ export default function App() {
           project_dir: activeProject.path,
           agent_type: agentType,
           model: model || null,
+          max_steps: maxSteps,
           host,
           api_key: agentType === 'ollama_cloud' ? apiKey || undefined
                  : agentType === 'gemini' ? geminiApiKey || undefined
@@ -1053,6 +1058,23 @@ export default function App() {
                 <button id="btn-refresh-models" className="sb-refresh" onClick={fetchModels}
                   disabled={modelsLoading || TERMINAL_AGENT_IDS.includes(agentType)}>↻</button>
               </div>
+              <div className="sb-set-label" style={{ marginTop: 12 }}>
+                MAX STEPS: {maxSteps === 0 ? 'Unlimited' : maxSteps}
+              </div>
+              <div className="sb-model-row">
+                <input
+                  id="max-steps-slider"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  className="sb-set-input"
+                  style={{ height: 'auto', padding: '4px 0' }}
+                  value={maxSteps}
+                  onChange={e => setMaxSteps(parseInt(e.target.value))}
+                />
+              </div>
+
               {(agentType === 'lmstudio' || agentType === 'ollama') && (
                 <>
                   <div className="sb-set-label" style={{ marginTop: 8 }}>HOST</div>
