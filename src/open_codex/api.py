@@ -211,6 +211,7 @@ class ChatStreamRequest(BaseModel):
     api_key: Optional[str] = None
     thread_id: Optional[str] = None
     slm_context: Optional[str] = None  # SLM-v3 role preamble injected by matrix panel
+    max_steps: Optional[int] = 25
 
 class CommitRequest(BaseModel):
     project_dir: str
@@ -786,7 +787,7 @@ async def chat_stream(req: ChatStreamRequest):
 
                 from open_codex.agents.coding_agent import CodingAgent
                 agent = CodingAgent(caller)
-                for event in agent.run(effective_message, req.project_dir):
+                for event in agent.run(effective_message, req.project_dir, max_steps=req.max_steps):
                     if stop_event.is_set():
                         loop.call_soon_threadsafe(
                             queue.put_nowait,

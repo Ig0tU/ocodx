@@ -25,8 +25,8 @@ def make_caller(*responses):
     return caller
 
 
-def collect(agent, prompt, project_dir):
-    return list(agent.run(prompt, project_dir))
+def collect(agent, prompt, project_dir, **kwargs):
+    return list(agent.run(prompt, project_dir, **kwargs))
 
 
 # ── Regex sanity ──────────────────────────────────────────────────────────────
@@ -148,6 +148,41 @@ class TestCodingAgentToolLoop:
         events = collect(agent, "loop forever", tmp_project)
         error_events = [e for e in events if e["type"] == "error"]
         assert any("max steps" in e["content"].lower() for e in error_events)
+        assert any("(25)" in e["content"] for e in error_events)
+
+    def test_custom_max_steps(self, tmp_project):
+        """Agent should respect custom max_steps parameter."""
+        always_action = json.dumps({"tool": "list_directory", "args": {"path": "."}})
+        def infinite_caller(messages):
+            return f"ACTION: {always_action}"
+        agent = CodingAgent(infinite_caller)
+        events = collect(agent, "loop forever", tmp_project, max_steps=5)
+        error_events = [e for e in events if e["type"] == "error"]
+        assert any("max steps" in e["content"].lower() for e in error_events)
+        assert any("(5)" in e["content"] for e in error_events)
+        # Should have 5 tool_call events
+        tool_calls = [e for e in events if e["type"] == "tool_call"]
+        assert len(tool_calls) == 5
+
+    def test_unlimited_steps(self, tmp_project):
+        """Agent should not emit max steps error if max_steps is 0 (though we stop it manually in test)."""
+        responses = [
+            'ACTION: {"tool": "list_directory", "args": {"path": "."}}'
+        ] * 10 + ["DONE: finally done"]
+
+        idx = [0]
+        def caller(messages):
+            r = responses[idx[0]]
+            idx[0] += 1
+            return r
+
+        agent = CodingAgent(caller)
+        events = collect(agent, "loop long", tmp_project, max_steps=0)
+
+        types = [e["type"] for e in events]
+        assert "done" in types
+        assert "error" not in [e["type"] for e in events if "max steps" in str(e.get("content", ""))]
+        assert idx[0] == 11
 
 
 # ── _run_command ──────────────────────────────────────────────────────────────
