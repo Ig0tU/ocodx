@@ -44,6 +44,20 @@ TERMINAL_AGENTS: dict[str, dict] = {
         "description": "OpenClaw AI coding agent",
         "auth_hint": "Run: openclaw auth",
     },
+    "opencode": {
+        "label": "OpenCode",
+        "binary": "opencode",
+        "icon": "⬡",
+        "description": "OpenCode AI coding agent",
+        "auth_hint": "Set OPENAI_API_KEY or ANTHROPIC_API_KEY",
+    },
+    "qwen_cli": {
+        "label": "Qwen CLI",
+        "binary": "qwen",
+        "icon": "◉",
+        "description": "Qwen AI coding agent (Alibaba)",
+        "auth_hint": "Set DASHSCOPE_API_KEY or configure Ollama with a Qwen model",
+    },
 }
 
 
@@ -110,10 +124,70 @@ def _is_authenticated(agent_id: str) -> bool:
         oc_dir = os.path.expanduser("~/.openclaw")
         return os.path.isdir(oc_dir)
 
+    elif agent_id == "opencode":
+        return bool(
+            os.getenv("OPENAI_API_KEY")
+            or os.getenv("ANTHROPIC_API_KEY")
+            or os.getenv("GOOGLE_API_KEY")
+        )
+
+    elif agent_id == "qwen_cli":
+        return bool(
+            os.getenv("DASHSCOPE_API_KEY")
+            or shutil.which("ollama")  # Qwen models available via Ollama
+        )
+
     return False
 
 
 # ── Runner ────────────────────────────────────────────────────────────────────
+
+# ── Matrix header (dynamic per orchestrator) ─────────────────────────────────
+
+def _make_matrix_header(agent_id: str, label: str) -> str:
+    """
+    Return a personalised OCODX-MATRIX context block addressed to the
+    specific orchestrator agent that is being invoked.  This tells the
+    agent exactly who it is and what its role is within Open Codex,
+    regardless of whether it reads env vars or external config files.
+    """
+    config_hint = {
+        "claude_code": "Your CLAUDE.md contains the full matrix reference.",
+        "gemini_cli":  "Your BUILD.md contains the full matrix reference.",
+        "codex":       "Your AGENTS.md contains the full matrix reference.",
+        "opencode":    "Your opencode.md contains the full matrix reference.",
+        "openclaw":    "Your openclaw.md contains the full matrix reference.",
+        "qwen_cli":    "Your qwen.md contains the full matrix reference.",
+    }.get(agent_id, "The full matrix reference is embedded below.")
+
+    return f"""[OCODX-MATRIX — Orchestrator: {label}]
+
+You ({label}) are the SOVEREIGN LIQUID MATRIX ORCHESTRATOR for this session.
+You have been invoked by Open Codex (http://localhost:8000/api/) to lead the
+full SLM agent grid. {config_hint}
+
+Your operating mandate:
+1. Identify which matrix node(s) are best suited to the task below.
+2. Announce the active node(s): e.g. "▶ A1 · Backend Architect active"
+3. Execute in that agent's voice/persona, sequentially if multi-node.
+4. Deliver concrete output: code, commands, config, or decisions.
+
+Matrix quick-reference (full details in your config file):
+  A1-A5 Architecture · L1-L7 Language · I1-I4 Cloud/Infra
+  O1-O4 Operations  · D1-D5 AI/Data  · Q1-Q7 Quality
+  B1-B3 Business    · G1-G3 Growth   · GYM Forge new agents
+
+OCODX API endpoints available to you:
+  GET  http://localhost:8000/api/slm/agents    — full matrix roster
+  GET  http://localhost:8000/api/slm/phases    — workflow phases
+  POST http://localhost:8000/api/chat/stream   — invoke any SLM agent
+  POST http://localhost:8000/api/browser/run   — launch AI browser task
+  GET  http://localhost:8000/api/gym/agents    — forged custom agents
+  GET  http://localhost:8000/api/mcp/servers   — active MCP servers
+
+--- USER REQUEST ---
+"""
+
 
 def run_terminal_agent(
     agent_id: str,
@@ -127,15 +201,26 @@ def run_terminal_agent(
         return
 
     binary = info["binary"]
+    label  = info["label"]   # resolve before first use
     if not shutil.which(binary):
-        yield {"type": "error", "content": f"{info['label']} is not installed (binary: {binary})"}
+        yield {"type": "error", "content": f"{label} is not installed (binary: {binary})"}
         return
 
-    cmd = _build_cmd(agent_id, binary, prompt)
-    label = info["label"]
+    # Prepend personalised OCODX-MATRIX header so every agent knows its role
+    enriched_prompt = _make_matrix_header(agent_id, label) + prompt
+
+    cmd = _build_cmd(agent_id, binary, enriched_prompt)
     logger.info("Terminal agent %s cmd: %s cwd: %s", agent_id, cmd, project_dir)
 
-    yield {"type": "thinking", "content": f"Delegating to {label}…"}
+    yield {"type": "thinking", "content": f"{info['icon']} {label} activated as Matrix Orchestrator"}
+
+    # Inject OCODX env vars — allows BUILD.md / CLAUDE.md / AGENTS.md etc.
+    # to detect they are operating inside Open Codex and switch to orchestrator mode.
+    env = os.environ.copy()
+    env["OCODX"] = "1"
+    env["OCODX_HOST"] = "http://localhost:8000"
+    env["OCODX_AGENT"] = agent_id
+    env["OCODX_ORCHESTRATOR"] = label  # e.g. "Claude Code", "Gemini CLI"
 
     try:
         proc = subprocess.Popen(
@@ -143,6 +228,7 @@ def run_terminal_agent(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             cwd=project_dir,
+            env=env,
             text=True,
             bufsize=1,
         )
@@ -264,4 +350,8 @@ def _build_cmd(agent_id: str, binary: str, prompt: str) -> list[str]:
         return [binary, prompt]
     elif agent_id == "openclaw":
         return [binary, "-p", prompt]
+    elif agent_id == "opencode":
+        return [binary, prompt]
+    elif agent_id == "qwen_cli":
+        return [binary, prompt]
     return [binary, prompt]

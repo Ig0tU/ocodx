@@ -23,6 +23,16 @@ from open_codex.mcp_bridge import MCPBridge
 from open_codex.mcp_bridge import JoomlaMCPServer
 from open_codex.mcp_servers import build_native_servers
 from open_codex.mcp_servers_yoo import build_yootheme_server
+from open_codex.mcp_servers_gym import GymMCPServer, load_custom_agents, load_custom_clusters, load_scenarios
+from open_codex.mcp_servers_cryptkeeper import (
+    CryptKeeperMCPServer,
+    env_set, env_delete, env_list_names,
+    list_requests, dismiss_request, deny_request,
+)
+from open_codex.mcp_servers_repo import (
+    add_repo, remove_repo, reload_all as _repo_reload_all, list_repos,
+)
+import open_codex.mcp_autopilot as _autopilot
 
 _JOOMCPLA_SCRIPT = os.path.join(
     os.path.dirname(__file__), "..", "..", "..", "joomcpla-main", "main.py"
@@ -100,6 +110,27 @@ _mcp_bridge.register(_yoo_server)
 # Register all native MCP servers
 for _srv in build_native_servers():
     _mcp_bridge.register(_srv)
+
+# Register the SLM Gym Forge server
+_gym_server = GymMCPServer()
+_mcp_bridge.register(_gym_server)
+
+# Register the CryptKeeper secret management server
+_cryptkeeper_server = CryptKeeperMCPServer(_mcp_bridge)
+
+# Re-register any previously saved Repo→MCP servers
+_repo_reload_all(_mcp_bridge)
+
+# Restore autopilot state from disk (re-enable loop if it was on)
+_autopilot_config = {
+    "AI_PROVIDER":    os.getenv("JOOMLA_AI_PROVIDER", "ollama"),
+    "OLLAMA_HOST":    os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+    "OLLAMA_MODEL":   os.getenv("OLLAMA_MODEL", "llama3"),
+    "LMSTUDIO_HOST":  os.getenv("LMSTUDIO_HOST", "http://localhost:1234"),
+    "LMSTUDIO_MODEL": os.getenv("LMSTUDIO_MODEL", "local-model"),
+    "GEMINI_API_KEY": os.getenv("GEMINI_API_KEY", ""),
+    "GEMINI_MODEL":   os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+}
 
 app = FastAPI(title="Open Codex API", version="0.1.18")
 app.add_middleware(
@@ -216,6 +247,11 @@ class ChatStreamRequest(BaseModel):
 class CommitRequest(BaseModel):
     project_dir: str
     message: str
+
+class PushPullRequest(BaseModel):
+    project_dir: str
+    remote: str = 'origin'
+    branch: str = ''
 
 class ThreadUpsertRequest(BaseModel):
     project_dir: str
@@ -516,8 +552,11 @@ SLM_PHASES = [
 
 @app.get("/api/slm/agents")
 async def get_slm_agents(cluster: str = None, search: str = None):
-    """Return the full SLM-v3 Sovereign Liquid Matrix agent registry."""
-    agents = SLM_AGENTS
+    """Return the full SLM-v3 Sovereign Liquid Matrix agent registry, merged with custom Gym agents."""
+    # Merge built-in + custom gym agents (custom wins on coord collision)
+    custom = load_custom_agents()
+    custom_coords = {a["coord"] for a in custom}
+    agents = [a for a in SLM_AGENTS if a["coord"] not in custom_coords] + custom
     if cluster:
         agents = [a for a in agents if a["cluster"].lower() == cluster.lower()]
     if search:
@@ -537,6 +576,127 @@ async def get_slm_agents(cluster: str = None, search: str = None):
 async def get_slm_phases():
     """Return the SLM-v3 phased workflow sequences."""
     return {"phases": SLM_PHASES}
+
+
+# ── SLM Gym endpoints ─────────────────────────────────────────────────────────
+
+@app.get("/api/gym/agents")
+async def gym_list_agents():
+    """List all custom agents forged in the Gym."""
+    return {"agents": load_custom_agents()}
+
+
+@app.get("/api/gym/clusters")
+async def gym_list_clusters():
+    """List all custom clusters forged in the Gym."""
+    return {"clusters": load_custom_clusters()}
+
+
+@app.get("/api/gym/scenarios")
+async def gym_list_scenarios():
+    """List all training scenarios recorded in the Gym."""
+    return {"scenarios": load_scenarios()}
+
+
+# ── CryptKeeper endpoints ─────────────────────────────────────────────────────
+# Manages ~/.open_codex/.env — the canonical env file sourced by all
+# MCP servers.  Values are NEVER returned to the frontend; only key names.
+
+class CKEnvRequest(BaseModel):
+    name: str
+    value: str
+
+class CKDenyRequest(BaseModel):
+    name: str
+    reason: str = ""
+
+@app.get("/api/cryptkeeper/env")
+async def ck_get_env():
+    """Return stored env var NAMES only — values stay on server."""
+    return {"keys": env_list_names()}
+
+@app.post("/api/cryptkeeper/env")
+async def ck_set_env(req: CKEnvRequest):
+    """Store/update a key=value in ~/.open_codex/.env and export to live process."""
+    if not req.name.strip() or not req.value.strip():
+        raise HTTPException(400, "name and value are required")
+    env_set(req.name.strip(), req.value.strip())
+    return {"ok": True, "name": req.name.strip()}
+
+@app.delete("/api/cryptkeeper/env/{name}")
+async def ck_del_env(name: str):
+    """Remove a key from ~/.open_codex/.env."""
+    env_delete(name)
+    return {"ok": True, "name": name}
+
+@app.get("/api/cryptkeeper/requests")
+async def ck_get_requests():
+    """Pending secret requests from Forge agents (name, reason, browser_alternative)."""
+    return {"requests": list_requests()}
+
+@app.post("/api/cryptkeeper/dismiss/{name}")
+async def ck_dismiss(name: str):
+    """Dismiss a pending request (without storing anything)."""
+    dismiss_request(name)
+    return {"ok": True}
+
+@app.post("/api/cryptkeeper/deny")
+async def ck_deny(req: CKDenyRequest):
+    """Deny a secret request — agent should fall back to browser automation."""
+    deny_request(req.name, req.reason)
+    return {"ok": True}
+
+
+# ── Repo→MCP endpoints ────────────────────────────────────────────────────────
+
+class RepoAddRequest(BaseModel):
+    url:        str
+    name:       Optional[str] = None
+    auth_token: Optional[str] = None
+    branch:     Optional[str] = None
+
+@app.post("/api/repos")
+async def repo_add(req: RepoAddRequest):
+    """Clone a GitHub repo and register it as an MCP server."""
+    try:
+        manifest = add_repo(
+            _mcp_bridge,
+            url=req.url,
+            name=req.name,
+            auth_token=req.auth_token,
+            branch=req.branch,
+            ai_config={
+                "AI_PROVIDER":   os.getenv("JOOMLA_AI_PROVIDER", "ollama"),
+                "OLLAMA_HOST":   os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+                "OLLAMA_MODEL":  os.getenv("OLLAMA_MODEL", "llama3"),
+                "LMSTUDIO_HOST": os.getenv("LMSTUDIO_HOST", "http://localhost:1234"),
+                "LMSTUDIO_MODEL":os.getenv("LMSTUDIO_MODEL", "local-model"),
+            },
+        )
+        return {"ok": True, "repo": manifest}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+@app.get("/api/repos")
+async def repo_list():
+    """List all registered Repo→MCP tools."""
+    return {"repos": list_repos()}
+
+@app.delete("/api/repos/{name}")
+async def repo_remove(name: str):
+    """Unregister and delete a Repo→MCP tool."""
+    remove_repo(_mcp_bridge, name)
+    return {"ok": True}
+
+@app.post("/api/repos/{name}/pull")
+async def repo_pull(name: str):
+    """Pull latest changes for a registered repo."""
+    from open_codex.mcp_servers_repo import get_repo
+    srv = get_repo(name)
+    if not srv:
+        raise HTTPException(status_code=404, detail=f"Repo '{name}' not registered")
+    result = srv._server.call(f"repo_{name.lower().replace('-','_')}_pull", {}, ".")
+    return {"ok": True, "result": result}
 
 
 # ── Legacy /api/project/tree alias (fixes broken frontend call) ───────────────
@@ -682,6 +842,26 @@ async def git_commit(req: CommitRequest):
     return result
 
 
+@app.post("/api/git/push")
+async def git_push_endpoint(req: PushPullRequest):
+    if not os.path.isdir(req.project_dir):
+        raise HTTPException(400, "Invalid project directory")
+    result = git_tools.push(req.project_dir, req.remote, req.branch)
+    if not result["success"]:
+        raise HTTPException(500, result.get("output", "Push failed"))
+    return result
+
+
+@app.post("/api/git/pull")
+async def git_pull_endpoint(req: PushPullRequest):
+    if not os.path.isdir(req.project_dir):
+        raise HTTPException(400, "Invalid project directory")
+    result = git_tools.pull(req.project_dir, req.remote)
+    if not result["success"]:
+        raise HTTPException(500, result.get("output", "Pull failed"))
+    return result
+
+
 @app.get("/api/git/branches")
 async def git_branches(project: str):
     if not os.path.isdir(project):
@@ -767,6 +947,25 @@ async def chat_stream(req: ChatStreamRequest):
                         f"[USER REQUEST]\n{req.message}"
                     )
                 for event in run_terminal_agent(req.agent_type, effective_prompt, req.project_dir):
+                    if stop_event.is_set():
+                        loop.call_soon_threadsafe(
+                            queue.put_nowait,
+                            json.dumps({"type": "aborted", "stream_id": stream_id})
+                        )
+                        break
+                    loop.call_soon_threadsafe(queue.put_nowait, json.dumps(event))
+            elif req.agent_type == "gym_instructor":
+                # ── SLM Gym Instructor — agent forge + training specialist ──────
+                # req.slm_context carries the underlying provider type ("ollama", "lmstudio", "gemini", …)
+                gym_provider = (req.slm_context or "ollama").strip()
+                if gym_provider not in {"lmstudio", "ollama", "ollama_cloud", "gemini"}:
+                    gym_provider = "ollama"
+                caller = AgentBuilder.get_llm_caller(
+                    gym_provider, req.model, req.host, req.api_key
+                )
+                from open_codex.agents.gym_agent import GymAgent
+                gym = GymAgent(caller)
+                for event in gym.run(req.message, req.project_dir, max_steps=req.max_steps):
                     if stop_event.is_set():
                         loop.call_soon_threadsafe(
                             queue.put_nowait,
@@ -1021,6 +1220,7 @@ async def mcp_list_servers():
                 "description": s.description,
                 "healthy": s.healthy,
                 "tool_count": len(s.tools),
+                "removable": getattr(s, "removable", False),
                 "tools": [
                     {
                         "name": t.name,
@@ -1036,6 +1236,25 @@ async def mcp_list_servers():
         ],
         "total_tools": sum(len(s.tools) for s in servers),
     }
+
+
+@app.delete("/api/mcp/servers/{server_id}")
+async def mcp_remove_server(server_id: str):
+    """Remove any custom/removable MCP server (repo or user-added)."""
+    srv = _mcp_bridge.get(server_id)
+    if srv is None:
+        raise HTTPException(status_code=404, detail=f"Server '{server_id}' not found.")
+    if not getattr(srv, "removable", False):
+        raise HTTPException(status_code=403,
+                            detail=f"Server '{server_id}' is a built-in server and cannot be removed.")
+    # If it's a repo server, also clean up the cloned files
+    if server_id.startswith("repo_"):
+        from open_codex.mcp_servers_repo import remove_repo
+        # slug is everything after 'repo_'
+        remove_repo(_mcp_bridge, server_id[len("repo_"):])
+    else:
+        _mcp_bridge.unregister(server_id)
+    return {"ok": True, "removed": server_id}
 
 
 @app.post("/api/mcp/call")
@@ -1171,6 +1390,61 @@ async def browser_abort(session_id: str):
 async def browser_sessions():
     """List IDs of all currently active browser sessions."""
     return {"sessions": list(_active_browser_sessions.keys())}
+
+
+# ── Auto-MCPilot endpoints ────────────────────────────────────────────────────
+
+class AutopilotToggleReq(BaseModel):
+    enabled:      bool
+    interval_min: int = 10
+
+@app.post("/api/autopilot/toggle")
+async def autopilot_toggle(req: AutopilotToggleReq):
+    """Enable or disable the Auto-MCPilot background trainer."""
+    status = _autopilot.toggle(
+        enabled=req.enabled,
+        bridge=_mcp_bridge,
+        config=_autopilot_config,
+        interval_min=req.interval_min,
+    )
+    return status
+
+@app.get("/api/autopilot/status")
+async def autopilot_status():
+    return _autopilot.get_status()
+
+@app.get("/api/autopilot/log")
+async def autopilot_log(n: int = 100):
+    return {"events": _autopilot.load_log(n)}
+
+@app.post("/api/autopilot/run")
+async def autopilot_run_now():
+    """Trigger an immediate autopilot cycle regardless of the timer."""
+    _autopilot.run_now(_mcp_bridge, _autopilot_config)
+    return {"triggered": True}
+
+@app.get("/api/autopilot/stream")
+async def autopilot_stream():
+    """SSE stream — yields autopilot events as they happen."""
+    async def _gen():
+        async for event in _autopilot.subscribe():
+            yield f"data: {json.dumps(event)}\n\n"
+    return StreamingResponse(_gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache",
+                                      "X-Accel-Buffering": "no"})
+
+
+# Restore autopilot on startup using an app lifespan event
+@app.on_event("startup")
+async def _restore_autopilot():
+    saved = _autopilot.get_status()
+    if saved.get("enabled"):
+        _autopilot.toggle(
+            enabled=True,
+            bridge=_mcp_bridge,
+            config=_autopilot_config,
+            interval_min=saved.get("interval_min", 10),
+        )
 
 
 # ── Serve built frontend ──────────────────────────────────────────────────────

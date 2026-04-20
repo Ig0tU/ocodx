@@ -76,6 +76,21 @@ def commit(project_dir: str, message: str) -> dict:
     return {"success": True, "hash": h.strip(), "output": out.strip()}
 
 
+def push(project_dir: str, remote: str = 'origin', branch: str = '') -> dict:
+    args = ['push', remote]
+    if branch:
+        args.append(branch)
+    code, out, err = _git(args, project_dir)
+    output = out.strip() or err.strip()
+    return {'success': code == 0, 'output': output}
+
+
+def pull(project_dir: str, remote: str = 'origin') -> dict:
+    code, out, err = _git(['pull', remote], project_dir)
+    output = out.strip() or err.strip()
+    return {'success': code == 0, 'output': output}
+
+
 def get_branches(project_dir: str) -> dict:
     _, out, _ = _git(['branch', '-a', '--format=%(refname:short)'], project_dir)
     _, current, _ = _git(['branch', '--show-current'], project_dir)

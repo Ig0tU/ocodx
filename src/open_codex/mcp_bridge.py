@@ -73,6 +73,10 @@ class MCPBridge:
     def register(self, server: MCPServer):
         self._servers[server.id] = server
 
+    def unregister(self, server_id: str) -> bool:
+        """Remove a server from the bridge. Returns True if it existed."""
+        return self._servers.pop(server_id, None) is not None
+
     def get(self, server_id: str) -> Optional[MCPServer]:
         return self._servers.get(server_id)
 
@@ -120,9 +124,10 @@ class MCPBridge:
 # ---------------------------------------------------------------------------
 
 class NativeMCPServer(MCPServer):
-    def __init__(self, **kwargs):
+    def __init__(self, removable: bool = False, **kwargs):
         super().__init__(**kwargs)
         self._dispatch: Dict[str, Callable] = {}
+        self.removable: bool = removable
 
     def _register_tool(self, name: str, fn: Callable, tool: MCPTool):
         self._dispatch[name] = fn

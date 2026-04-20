@@ -117,6 +117,26 @@ class AgentBuilder:
             agent = AgentBuilder.get_gemini_agent(model, api_key)
             return agent._generate_completion
 
+        # ── Terminal / CLI agent types → remap to underlying LLM provider ──
+        # These types are valid UI selections (claude_code, gemini_cli, codex,
+        # openclaw, gym_instructor) but they don't carry their own LLM caller.
+        # Fall back gracefully: prefer whatever provider the caller supplied
+        # via host/model hints, defaulting to ollama.
+        terminal_types = {"claude_code", "gemini_cli", "codex", "openclaw", "gym_instructor"}
+        if agent_type in terminal_types:
+            # If a Gemini API key was supplied, use Gemini
+            if api_key and agent_type in ("gemini_cli",):
+                agent = AgentBuilder.get_gemini_agent(model, api_key)
+                return agent._generate_completion
+            # Otherwise default to ollama (local, zero-config)
+            raw_host = host or "http://localhost:11434"
+            agent = AgentBuilder.get_ollama_agent(
+                model or "llama3.2",
+                _sanitize_ollama_host(raw_host),
+                api_key,
+            )
+            return agent._generate_completion
+
         raise ValueError(f"Unknown agent type: {agent_type}")
 
     @staticmethod

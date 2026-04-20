@@ -2,64 +2,123 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-:root {
-  /* Dark Glassmorphism Core Palette */
+:root,
+[data-theme="void"] {
+  /* ── Void (default dark violet) ─────────────────────────────── */
   --bg:         #07070f;
   --bg-2:       #0d0d1a;
   --bg-3:       #121224;
   --bg-4:       #1a1a30;
+  --bg-surface: #0f1117;
   --bg-glass:   rgba(13, 13, 26, 0.85);
   --bg-glass-2: rgba(18, 18, 36, 0.7);
 
-  /* Borders */
-  --border:     rgba(255, 255, 255, 0.06);
-  --border-2:   rgba(255, 255, 255, 0.1);
-  --border-glow: rgba(139, 92, 246, 0.3);
+  --border:      rgba(255, 255, 255, 0.06);
+  --border-2:    rgba(255, 255, 255, 0.10);
+  --border-glow: rgba(139, 92, 246, 0.30);
 
-  /* Text */
-  --text:     #f0f0ff;
-  --text-2:   #a0a0c0;
-  --text-3:   #5a5a80;
+  --text:   #f0f0ff;
+  --text-2: #a0a0c0;
+  --text-3: #5a5a80;
+  --text-dim: #6a6a90;
 
-  /* Accent — electric violet */
-  --accent:    hsl(262, 83%, 65%);
-  --accent-2:  hsl(262, 83%, 55%);
+  --accent:      hsl(262, 83%, 65%);
+  --accent-2:    hsl(262, 83%, 55%);
   --accent-glow: rgba(139, 92, 246, 0.25);
 
-  /* Semantic */
-  --green:     #34d399;
-  --red:       #f87171;
-  --blue:      #60a5fa;
-  --amber:     #fbbf24;
-  --teal:      #2dd4bf;
+  --green: #34d399; --red: #f87171; --blue: #60a5fa; --amber: #fbbf24; --teal: #2dd4bf;
 
-  /* Cluster hues (HSL) — one per SLM cluster */
-  --hsl-arc:  262; /* violet — Architecture Core */
-  --hsl-lng:  195; /* cyan — Language Excellence */
-  --hsl-cld:  210; /* blue — Cloud */
-  --hsl-ops:  160; /* green — Operations */
-  --hsl-aid:  285; /* purple — AI & Data */
-  --hsl-qsp:  0;   /* red — Quality */
-  --hsl-bus:  38;  /* amber — Business */
-  --hsl-rev:  22;  /* orange — Revenue */
-  --hsl-leg:  170; /* teal — Legacy */
-  --hsl-eng:  245; /* indigo — Engineering */
-  --hsl-dat:  200; /* sky — Data */
-  --hsl-rel:  142; /* emerald — Reliability */
-  --hsl-grw:  330; /* pink — Growth */
-  --hsl-gov:  52;  /* yellow — Governance */
-  --hsl-pst:  300; /* fuchsia — Product */
-  --hsl-exp:  320; /* rose — Experience */
+  --hsl-arc: 262; --hsl-lng: 195; --hsl-cld: 210; --hsl-ops: 160; --hsl-aid: 285;
+  --hsl-qsp: 0;   --hsl-bus: 38;  --hsl-rev: 22;  --hsl-leg: 170; --hsl-eng: 245;
+  --hsl-dat: 200; --hsl-rel: 142; --hsl-grw: 330; --hsl-gov: 52;  --hsl-pst: 300; --hsl-exp: 320;
 
-  /* Radii */
-  --radius:    8px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
-
-  /* Fonts */
+  --radius: 8px; --radius-lg: 14px; --radius-xl: 20px;
   --mono: 'JetBrains Mono', 'Cascadia Code', ui-monospace, 'SF Mono', monospace;
   --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
 }
+
+/* ── Slate — dark steel blue (no purple) ──────────────────────── */
+[data-theme="slate"] {
+  --bg:         #08101a;
+  --bg-2:       #0d1824;
+  --bg-3:       #111f2e;
+  --bg-4:       #172638;
+  --bg-surface: #0b1520;
+  --bg-glass:   rgba(13, 24, 36, 0.87);
+  --bg-glass-2: rgba(17, 31, 46, 0.72);
+
+  --border:      rgba(255, 255, 255, 0.07);
+  --border-2:    rgba(255, 255, 255, 0.12);
+  --border-glow: rgba(56, 149, 220, 0.35);
+
+  --text:   #e6f0fc;
+  --text-2: #7aaac8;
+  --text-3: #3d5a75;
+  --text-dim: #547090;
+
+  --accent:      hsl(210, 80%, 62%);
+  --accent-2:    hsl(210, 80%, 52%);
+  --accent-glow: rgba(56, 149, 220, 0.28);
+}
+
+/* ── Ember — warm amber on obsidian ───────────────────────────── */
+[data-theme="ember"] {
+  --bg:         #090810;
+  --bg-2:       #110f15;
+  --bg-3:       #181420;
+  --bg-4:       #211c28;
+  --bg-surface: #0d0b12;
+  --bg-glass:   rgba(17, 15, 21, 0.87);
+  --bg-glass-2: rgba(24, 20, 32, 0.72);
+
+  --border:      rgba(255, 200, 100, 0.07);
+  --border-2:    rgba(255, 200, 100, 0.13);
+  --border-glow: rgba(230, 148, 38, 0.35);
+
+  --text:   #f5f0e0;
+  --text-2: #c4a96e;
+  --text-3: #705a35;
+  --text-dim: #8a7045;
+
+  --accent:      hsl(38, 90%, 58%);
+  --accent-2:    hsl(38, 90%, 48%);
+  --accent-glow: rgba(230, 148, 38, 0.30);
+}
+
+/* ── Light — clean minimal ────────────────────────────────────── */
+[data-theme="light"] {
+  --bg:         #f0f2f5;
+  --bg-2:       #fafbfc;
+  --bg-3:       #e7eaee;
+  --bg-4:       #dde1e7;
+  --bg-surface: #ffffff;
+  --bg-glass:   rgba(250, 251, 252, 0.93);
+  --bg-glass-2: rgba(231, 234, 238, 0.82);
+
+  --border:      rgba(0, 0, 0, 0.09);
+  --border-2:    rgba(0, 0, 0, 0.15);
+  --border-glow: rgba(14, 160, 148, 0.30);
+
+  --text:   #18192e;
+  --text-2: #444868;
+  --text-3: #7a80a0;
+  --text-dim: #909ab8;
+
+  --accent:      hsl(183, 68%, 38%);
+  --accent-2:    hsl(183, 68%, 30%);
+  --accent-glow: rgba(14, 160, 148, 0.24);
+
+  --green: #0d9962; --red: #dc3535; --blue: #2563eb; --amber: #d97706; --teal: #0d9488;
+}
+
+/* Light mode body text inversion */
+[data-theme="light"] body { color: var(--text); background: var(--bg); }
+[data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(14,160,148,0.22); }
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: rgba(14,160,148,0.38); }
+[data-theme="ember"] ::-webkit-scrollbar-thumb { background: rgba(230,148,38,0.22); }
+[data-theme="ember"] ::-webkit-scrollbar-thumb:hover { background: rgba(230,148,38,0.38); }
+[data-theme="slate"] ::-webkit-scrollbar-thumb { background: rgba(56,149,220,0.22); }
+[data-theme="slate"] ::-webkit-scrollbar-thumb:hover { background: rgba(56,149,220,0.38); }
 
 html, body, #root { height: 100%; overflow: hidden; }
 
