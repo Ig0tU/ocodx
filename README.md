@@ -1,8 +1,12 @@
 # OCODX — Open Codex Desktop
 
 <div align="center">
-  <img src="./.github/demo.gif" width="800" alt="OCODX Interface Demo">
+  <img src="./.github/agent_matrix.png" width="800" alt="OCODX Agent Matrix">
+  <img src="./.github/step_limiter.png" width="800" alt="OCODX Step Limiter">
   <h1 align="center">⬡ OCODX</h1>
+  <p align="center">
+    <a href="./.github/showcase.webm"><b>Watch the Showcase Video</b></a>
+  </p>
   <p align="center">The Sovereign Liquid Matrix (SLM-v3) Desktop Interface</p>
   <p align="center">
     <a href="#-installation"><b>Get Started</b></a> •
@@ -27,14 +31,20 @@ Designed for deep flow and professional engineering, OCODX introduces a multi-pa
 ### ⬡ Sovereign Liquid Matrix (SLM-v3)
 Access **90+ specialized agentic roles** across 16 logic clusters. Each role (Architecture, DevSecOps, Cloud, etc.) is tuned for precision, allowing you to persist knowledge in a "liquid state" across sub-agentic operations.
 
+<img src="./.github/agent_matrix.png" width="800" alt="Agent Matrix">
+
 ### ⊕ MCP Hub (Model Context Protocol)
 Orchestrate **50+ tools** from a single interface. The OCODX hub connects your AI directly to your workspace:
 - **Filesystem & Shell**: Safe, confirmed execution.
 - **Git & SQLite**: Automated commits and data surgery.
 - **Joomla & YOOtheme**: Expert CMS management tools.
 
+<img src="./.github/mcp_hub.png" width="800" alt="MCP Hub">
+
 ### 🌐 AionUI Browser (AI on UI)
 A headed autonomous browser agent that performs live web research and automation while you watch. AionUI brings "AI on UI" to life, navigating complex web interfaces to gather documentation and perform tasks.
+
+<img src="./.github/phase_launcher.png" width="800" alt="Phase Launcher">
 
 ### 🏗 YOO Builder
 AI-native visual layout generation for **YOOtheme Pro**.
@@ -48,6 +58,7 @@ AI-native visual layout generation for **YOOtheme Pro**.
 
 - **Hybrid Orchestration**: Seamlessly switch between Local (Ollama/LM Studio) and Cloud (Gemini/Ollama Cloud) providers.
 - **Visual Terminal**: Real-time streaming of shell commands and file changes with one-click approval.
+- **Configurable Step Limiter**: Take full control of agent autonomy with a new slider-based step limiter. Support for up to **Unlimited** steps for complex long-running operations.
 - **Desktop Integration**: Use the `manage.sh` tool to create a native macOS `.app` bundle with a custom OCODX icon.
 - **Security First**: Every action—from writing a file to pushing a commit—requires your explicit confirmation in the UI.
 
