@@ -243,6 +243,7 @@ class ChatStreamRequest(BaseModel):
     thread_id: Optional[str] = None
     slm_context: Optional[str] = None  # SLM-v3 role preamble injected by matrix panel
     max_steps: Optional[int] = 25
+    team_mode: bool = False  # SLM multi-agent swarm mode
 
 class CommitRequest(BaseModel):
     project_dir: str
@@ -305,90 +306,403 @@ async def list_automations():
     """Return all available automations grouped by category."""
     return [
         # ── Code Quality ───────────────────────────────
-        {"id": "auto-fix",        "name": "Auto-Fix",          "category": "Code Quality",  "icon": "🔧",
-         "description": "Scan and auto-fix linting, formatting, and style issues across the entire project.",
-         "browser": False},
-        {"id": "gen-tests",       "name": "Gen Tests",         "category": "Code Quality",  "icon": "✅",
-         "description": "Generate comprehensive unit and integration tests for all new functions and modules.",
-         "browser": False},
-        {"id": "security-scan",   "name": "Security Scan",     "category": "Code Quality",  "icon": "🛡️",
-         "description": "Run SAST, dependency vulnerability scan, and secrets detection with remediation plan.",
-         "browser": False},
-        {"id": "perf-profile",    "name": "Perf Profile",      "category": "Code Quality",  "icon": "⚡",
-         "description": "Profile CPU/memory hotspots and emit a prioritized optimization backlog.",
-         "browser": False},
-        {"id": "arch-review",     "name": "Arch Review",       "category": "Code Quality",  "icon": "🏗️",
-         "description": "Audit project structure against SLM-v3 patterns and emit an architecture decision record.",
-         "browser": False},
-        {"id": "dependency-audit","name": "Dependency Audit",  "category": "Code Quality",  "icon": "📦",
-         "description": "Check all dependencies for outdated versions, CVEs, and license conflicts.",
-         "browser": False},
+        {
+            "id": "auto-fix", "name": "Auto-Fix", "category": "Code Quality", "icon": "🔧",
+            "description": "Scan and auto-fix linting, formatting, and style issues across the entire project.",
+            "browser": False,
+            "task_template": (
+                "▶ Q3 · Code Reviewer + Q6 · Perf Engineer active.\n\n"
+                "Run a full lint, format, and style sweep on this project and fix every issue found.\n\n"
+                "STEP 1 — Detect project type: read package.json / pyproject.toml / go.mod / Cargo.toml / composer.json.\n"
+                "STEP 2 — Read any lint config files (.eslintrc, .prettierrc, ruff.toml, .flake8, .golangci.yml).\n"
+                "STEP 3 — Run the appropriate auto-fix commands:\n"
+                "  Node/TS: npx eslint --fix . && npx prettier --write .\n"
+                "  Python:  ruff check --fix . && ruff format .  (fallback: black . && isort .)\n"
+                "  Go:      gofmt -w . && golangci-lint run --fix\n"
+                "  Rust:    cargo fmt && cargo clippy --fix --allow-dirty\n"
+                "  PHP:     ./vendor/bin/php-cs-fixer fix .\n"
+                "STEP 4 — Run the linter again to verify zero remaining errors.\n"
+                "STEP 5 — If any files still have unfixable issues, edit_file them directly.\n"
+                "DONE: List every file changed, issues fixed, and any remaining manual items."
+            ),
+        },
+        {
+            "id": "gen-tests", "name": "Gen Tests", "category": "Code Quality", "icon": "✅",
+            "description": "Generate comprehensive unit and integration tests for all new functions and modules.",
+            "browser": False,
+            "task_template": (
+                "▶ Q1 · Security Auditor + Q3 · Code Reviewer active.\n\n"
+                "Generate comprehensive tests for every untested function and module in this project.\n\n"
+                "STEP 1 — list_directory to discover all source files.\n"
+                "STEP 2 — Detect test framework: look for jest.config.*, pytest.ini, go.mod (go test), vitest.config.*.\n"
+                "STEP 3 — Read each source file. For every exported function/class/route, write tests covering:\n"
+                "  • Happy path with realistic inputs\n"
+                "  • Edge cases: empty, null/None, boundary values, large inputs\n"
+                "  • Error paths: invalid input, missing deps, permission errors\n"
+                "  • Integration tests for any HTTP routes (use supertest/httpx/net/http/test)\n"
+                "STEP 4 — write_file each test file alongside its source (e.g. src/foo.ts → src/foo.test.ts).\n"
+                "STEP 5 — run_command to execute the test suite and fix any failures.\n"
+                "DONE: Summary of test files created, functions covered, and overall coverage estimate."
+            ),
+        },
+        {
+            "id": "security-scan", "name": "Security Scan", "category": "Code Quality", "icon": "🛡️",
+            "description": "Run SAST, dependency vulnerability scan, and secrets detection with remediation plan.",
+            "browser": False,
+            "task_template": (
+                "▶ Q1 · Security Auditor active.\n\n"
+                "Perform a full security audit of this project: SAST, dependency CVEs, and secrets detection.\n\n"
+                "STEP 1 — Detect language/stack from project files.\n"
+                "STEP 2 — Run dependency vulnerability scan:\n"
+                "  Node: npm audit --json\n"
+                "  Python: pip-audit --format json  (fallback: safety check)\n"
+                "  Go: govulncheck ./...\n"
+                "  Rust: cargo audit\n"
+                "STEP 3 — Scan for hardcoded secrets: search_files for patterns like 'api_key', 'secret', 'password', 'token', 'BEGIN RSA', 'sk-' across all source files.\n"
+                "STEP 4 — Read all route handlers, input parsers, and DB query files. Look for:\n"
+                "  • SQL injection (string-concatenated queries)\n"
+                "  • XSS (unescaped user input rendered to HTML)\n"
+                "  • Insecure deserialization, path traversal, SSRF\n"
+                "  • Missing auth/authz checks on sensitive routes\n"
+                "STEP 5 — For each finding: edit_file to apply the fix or add a // SECURITY: comment with the remediation.\n"
+                "STEP 6 — write_file SECURITY_REPORT.md with: severity-ranked findings, CVEs, remediation status.\n"
+                "DONE: Summary of vulnerabilities found, fixed, and remaining."
+            ),
+        },
+        {
+            "id": "perf-profile", "name": "Perf Profile", "category": "Code Quality", "icon": "⚡",
+            "description": "Profile CPU/memory hotspots and emit a prioritized optimization backlog.",
+            "browser": False,
+            "task_template": (
+                "▶ Q6 · Perf Engineer active.\n\n"
+                "Profile this project for CPU and memory hotspots and produce a prioritized optimization backlog.\n\n"
+                "STEP 1 — Read all source files to identify hot paths: loops, DB queries, file I/O, network calls.\n"
+                "STEP 2 — Run profiling where possible:\n"
+                "  Python: python -m cProfile -o profile.out main.py  (or pytest --profile)\n"
+                "  Node: node --prof index.js  then node --prof-process\n"
+                "  Go: go test -bench=. -benchmem ./...\n"
+                "  Rust: cargo bench\n"
+                "STEP 3 — Analyze each hot path for:\n"
+                "  • N+1 query patterns (loop + individual DB fetch)\n"
+                "  • Missing indexes on frequently-filtered columns\n"
+                "  • Redundant re-computation (add memoization/caching)\n"
+                "  • Synchronous blocking I/O that should be async\n"
+                "  • Unnecessary object allocations in tight loops\n"
+                "STEP 4 — Apply the top 3 highest-impact optimizations with edit_file.\n"
+                "STEP 5 — write_file PERF_BACKLOG.md with: issue, estimated impact (High/Med/Low), suggested fix, effort.\n"
+                "DONE: Summary of optimizations applied and backlog items documented."
+            ),
+        },
+        {
+            "id": "arch-review", "name": "Arch Review", "category": "Code Quality", "icon": "🏗️",
+            "description": "Audit project structure against SLM-v3 patterns and emit an architecture decision record.",
+            "browser": False,
+            "task_template": (
+                "▶ A1 · Backend Architect + A5 · Architecture Quality Guardian active.\n\n"
+                "Audit this project's architecture against SLM-v3 best practices and produce an ADR.\n\n"
+                "STEP 1 — Map the full project structure with list_directory (recursively explore key dirs).\n"
+                "STEP 2 — Read all entry points, routers, models, and service files.\n"
+                "STEP 3 — Evaluate against these patterns:\n"
+                "  • Separation of concerns (controllers vs services vs data layer)\n"
+                "  • Dependency injection / inversion of control\n"
+                "  • Error boundary placement and propagation\n"
+                "  • Config/secret management (no hardcoded values)\n"
+                "  • Logging and observability (structured logs, trace IDs)\n"
+                "  • API contract consistency (versioning, error shapes)\n"
+                "  • Test pyramid alignment (unit > integration > e2e)\n"
+                "STEP 4 — For each violation: suggest a concrete refactor with before/after code snippet.\n"
+                "STEP 5 — write_file ARCHITECTURE_DECISION_RECORD.md with:\n"
+                "  Status, Context, Decision, Consequences, and Action Items ranked by priority.\n"
+                "DONE: ADR written with all findings and recommendations."
+            ),
+        },
+        {
+            "id": "dependency-audit", "name": "Dependency Audit", "category": "Code Quality", "icon": "📦",
+            "description": "Check all dependencies for outdated versions, CVEs, and license conflicts.",
+            "browser": False,
+            "task_template": (
+                "▶ Q1 · Security Auditor + O1 · DevOps SRE active.\n\n"
+                "Audit all project dependencies for outdated versions, known CVEs, and license issues.\n\n"
+                "STEP 1 — Read all dependency manifests: package.json, requirements.txt, pyproject.toml, go.mod, Cargo.toml.\n"
+                "STEP 2 — Run outdated check:\n"
+                "  Node: npm outdated --json\n"
+                "  Python: pip list --outdated --format json\n"
+                "  Go: go list -m -u all\n"
+                "  Rust: cargo outdated\n"
+                "STEP 3 — Run CVE scan (see security-scan step 2 commands).\n"
+                "STEP 4 — Check licenses: for each dep, note its license (MIT/Apache/GPL/LGPL/etc).\n"
+                "  Flag any GPL/AGPL deps in a commercial or proprietary codebase.\n"
+                "STEP 5 — write_file DEPENDENCY_AUDIT.md with three tables:\n"
+                "  1. Outdated deps (current → latest, breaking changes noted)\n"
+                "  2. CVEs (dep, severity, CVE ID, fix version)\n"
+                "  3. License conflicts (dep, license, risk level)\n"
+                "STEP 6 — Apply safe patch-level upgrades automatically where possible.\n"
+                "DONE: Audit report written, safe upgrades applied."
+            ),
+        },
         # ── Documentation ────────────────────────────
-        {"id": "doc-sync",        "name": "Doc Sync",          "category": "Documentation", "icon": "📝",
-         "description": "Keep README, CHANGELOG, and inline docstrings in sync with the latest code changes.",
-         "browser": False},
-        {"id": "readme-gen",      "name": "README Gen",        "category": "Documentation", "icon": "📖",
-         "description": "Auto-generate a rich README from code, docstrings, and project structure.",
-         "browser": False},
-        {"id": "changelog-sync",  "name": "Changelog Sync",   "category": "Documentation", "icon": "📄",
-         "description": "Synthesize git log into a structured CHANGELOG.md with semantic versioning.",
-         "browser": False},
-        {"id": "api-docs",        "name": "API Docs",          "category": "Documentation", "icon": "🔗",
-         "description": "Generate OpenAPI/Swagger documentation from route handlers and type annotations.",
-         "browser": False},
+        {
+            "id": "doc-sync", "name": "Doc Sync", "category": "Documentation", "icon": "📝",
+            "description": "Keep README, CHANGELOG, and inline docstrings in sync with the latest code changes.",
+            "browser": False,
+            "task_template": (
+                "▶ Q3 · Code Reviewer + L1 · Python Pro active.\n\n"
+                "Sync all documentation with the current state of the codebase.\n\n"
+                "STEP 1 — Read README.md (if exists). Read all source files.\n"
+                "STEP 2 — For each public function/class/method that lacks a docstring, add one.\n"
+                "  Python: \"\"\"One-line summary. Args: ... Returns: ...\"\"\"\n"
+                "  JS/TS: /** @param ... @returns ... */\n"
+                "  Go: // FunctionName does X.\n"
+                "STEP 3 — Read CHANGELOG.md (create if missing). Run: git log --oneline -30\n"
+                "  Add any commits since the last changelog entry under the correct version heading.\n"
+                "STEP 4 — Update README.md:\n"
+                "  • Ensure install/run instructions match current package.json/pyproject.toml scripts\n"
+                "  • Update any API endpoint tables to match current routes\n"
+                "  • Update environment variable tables to match current .env.example or config\n"
+                "STEP 5 — write_file each updated file with complete content.\n"
+                "DONE: List of files updated and specific sections changed."
+            ),
+        },
+        {
+            "id": "readme-gen", "name": "README Gen", "category": "Documentation", "icon": "📖",
+            "description": "Auto-generate a rich README from code, docstrings, and project structure.",
+            "browser": False,
+            "task_template": (
+                "▶ A1 · Backend Architect + Q3 · Code Reviewer active.\n\n"
+                "Generate a comprehensive, production-grade README.md for this project.\n\n"
+                "STEP 1 — Explore the full project: list_directory, read package.json/pyproject.toml/go.mod, read main entry points.\n"
+                "STEP 2 — Read all route handlers / API surface to document endpoints.\n"
+                "STEP 3 — Read any existing .env.example or config files to document env vars.\n"
+                "STEP 4 — write_file README.md with these sections:\n"
+                "  # Project Name — one-line description\n"
+                "  ## Features — bullet list of key capabilities\n"
+                "  ## Tech Stack — languages, frameworks, key deps\n"
+                "  ## Prerequisites — node/python/go version, required tools\n"
+                "  ## Installation — step-by-step clone + install commands\n"
+                "  ## Configuration — table of all env vars with description and defaults\n"
+                "  ## Running — dev, prod, and test commands\n"
+                "  ## API Reference — table of endpoints (method, path, description, auth)\n"
+                "  ## Project Structure — annotated directory tree\n"
+                "  ## Contributing — PR workflow, code style guide\n"
+                "  ## License\n"
+                "DONE: README.md written with full documentation."
+            ),
+        },
+        {
+            "id": "changelog-sync", "name": "Changelog Sync", "category": "Documentation", "icon": "📄",
+            "description": "Synthesize git log into a structured CHANGELOG.md with semantic versioning.",
+            "browser": False,
+            "task_template": (
+                "▶ O1 · DevOps SRE active.\n\n"
+                "Synthesize the git history into a structured CHANGELOG.md following Keep a Changelog format.\n\n"
+                "STEP 1 — run_command: git log --oneline --no-merges -100\n"
+                "STEP 2 — run_command: git tag --sort=-version:refname | head -20  (to find version tags)\n"
+                "STEP 3 — run_command: git log --format='%H %s' --no-merges  (full commit list)\n"
+                "STEP 4 — Read existing CHANGELOG.md if present.\n"
+                "STEP 5 — Categorize commits by type:\n"
+                "  Added: feat, add, new\n"
+                "  Changed: refactor, update, change, improve\n"
+                "  Fixed: fix, bug, patch, resolve\n"
+                "  Removed: remove, delete, drop\n"
+                "  Security: security, cve, vuln, auth\n"
+                "STEP 6 — write_file CHANGELOG.md using Keep a Changelog format:\n"
+                "  ## [Unreleased] — commits since last tag\n"
+                "  ## [x.y.z] — YYYY-MM-DD — commits per tag\n"
+                "  Each section has Added / Changed / Fixed / Removed / Security sub-sections.\n"
+                "DONE: CHANGELOG.md written with full history."
+            ),
+        },
+        {
+            "id": "api-docs", "name": "API Docs", "category": "Documentation", "icon": "🔗",
+            "description": "Generate OpenAPI/Swagger documentation from route handlers and type annotations.",
+            "browser": False,
+            "task_template": (
+                "▶ A1 · Backend Architect + A6 · API Gateway Architect active.\n\n"
+                "Generate complete OpenAPI 3.0 documentation for all API routes in this project.\n\n"
+                "STEP 1 — Find all route definition files: search_files for '@app.', 'router.', 'app.get(', 'app.post('.\n"
+                "STEP 2 — Read every route file. For each endpoint, extract:\n"
+                "  • HTTP method and path\n"
+                "  • Path/query parameters and their types\n"
+                "  • Request body schema (from Pydantic models, TypeScript interfaces, etc.)\n"
+                "  • Response schema and status codes\n"
+                "  • Auth requirements\n"
+                "STEP 3 — Write openapi.yaml with:\n"
+                "  openapi: 3.0.0, info (title, version, description)\n"
+                "  paths: each route with get/post/put/delete operations\n"
+                "  components/schemas: all request/response models\n"
+                "  components/securitySchemes: bearer token / API key if used\n"
+                "STEP 4 — Also write a concise API_REFERENCE.md table:\n"
+                "  | Method | Path | Description | Auth | Request Body | Response |\n"
+                "DONE: openapi.yaml and API_REFERENCE.md written."
+            ),
+        },
         # ── DevOps & Infra ───────────────────────────
-        {"id": "ci-gen",          "name": "CI Pipeline Gen",  "category": "DevOps",        "icon": "♾️",
-         "description": "Generate GitHub Actions / GitLab CI pipeline config from project type and commands.",
-         "browser": False},
-        {"id": "docker-gen",      "name": "Dockerize",         "category": "DevOps",        "icon": "🐳",
-         "description": "Generate optimized Dockerfile + docker-compose.yml for the current project stack.",
-         "browser": False},
-        {"id": "git-activity",    "name": "Git Activity Report","category": "DevOps",       "icon": "⚛️",
-         "description": "Analyze git history and generate a developer activity + hotspot heatmap report.",
-         "browser": False},
-        {"id": "license-check",   "name": "License Check",    "category": "DevOps",        "icon": "⚖️",
-         "description": "Scan all dependency licenses for incompatibilities and output a compliance report.",
-         "browser": False},
+        {
+            "id": "ci-gen", "name": "CI Pipeline Gen", "category": "DevOps", "icon": "♾️",
+            "description": "Generate GitHub Actions / GitLab CI pipeline config from project type and commands.",
+            "browser": False,
+            "task_template": (
+                "▶ I4 · Deploy Engineer + O1 · DevOps SRE active.\n\n"
+                "Generate a production-ready CI/CD pipeline for this project.\n\n"
+                "STEP 1 — Detect project type from: package.json, pyproject.toml, go.mod, Cargo.toml, Dockerfile.\n"
+                "STEP 2 — Read existing scripts (npm scripts, Makefile, justfile) to find test/build/lint commands.\n"
+                "STEP 3 — Check for existing .github/workflows/ or .gitlab-ci.yml.\n"
+                "STEP 4 — Generate .github/workflows/ci.yml with jobs:\n"
+                "  lint:  checkout → setup runtime → install deps → run linter\n"
+                "  test:  checkout → setup runtime → install deps → run tests with coverage\n"
+                "  build: checkout → setup runtime → install deps → build artifacts\n"
+                "  security: run dependency audit + secrets scan\n"
+                "  Use matrix strategy for multiple runtime versions where appropriate.\n"
+                "STEP 5 — If Dockerfile exists, also write .github/workflows/docker.yml to build+push on tags.\n"
+                "STEP 6 — write_file each workflow file.\n"
+                "DONE: CI pipeline files written with all jobs configured."
+            ),
+        },
+        {
+            "id": "docker-gen", "name": "Dockerize", "category": "DevOps", "icon": "🐳",
+            "description": "Generate optimized Dockerfile + docker-compose.yml for the current project stack.",
+            "browser": False,
+            "task_template": (
+                "▶ I4 · Deploy Engineer + I1 · Cloud Architect active.\n\n"
+                "Generate an optimized Dockerfile and docker-compose.yml for this project.\n\n"
+                "STEP 1 — Detect stack: read package.json (Node version), pyproject.toml (Python version), go.mod, etc.\n"
+                "STEP 2 — Read entry point files to understand the start command.\n"
+                "STEP 3 — Check for .env.example to identify required env vars.\n"
+                "STEP 4 — write_file Dockerfile with:\n"
+                "  • Multi-stage build (builder stage + slim runtime stage)\n"
+                "  • Non-root user for security\n"
+                "  • .dockerignore-friendly COPY patterns\n"
+                "  • Correct EXPOSE port\n"
+                "  • Health check instruction\n"
+                "  • Minimal final image (alpine or distroless)\n"
+                "STEP 5 — write_file docker-compose.yml with:\n"
+                "  • app service with build context, ports, env_file\n"
+                "  • Any required services (postgres, redis, etc.) detected from deps\n"
+                "  • Named volumes for persistent data\n"
+                "  • Networks config\n"
+                "STEP 6 — write_file .dockerignore with node_modules, __pycache__, .git, .env, dist, build.\n"
+                "DONE: Dockerfile, docker-compose.yml, and .dockerignore written."
+            ),
+        },
+        {
+            "id": "git-activity", "name": "Git Activity Report", "category": "DevOps", "icon": "⚛️",
+            "description": "Analyze git history and generate a developer activity + hotspot heatmap report.",
+            "browser": False,
+            "task_template": (
+                "▶ O1 · DevOps SRE + D4 · Data Engineer active.\n\n"
+                "Analyze git history and produce a developer activity and code hotspot report.\n\n"
+                "STEP 1 — run_command: git log --format='%ae %ad %s' --date=short -500\n"
+                "STEP 2 — run_command: git log --numstat --no-merges -200 (files changed per commit)\n"
+                "STEP 3 — run_command: git shortlog -sn --no-merges (commits per author)\n"
+                "STEP 4 — run_command: git log --format='' --name-only | sort | uniq -c | sort -rn | head -30 (hotspot files)\n"
+                "STEP 5 — Analyze the data:\n"
+                "  • Commit frequency by week / by author\n"
+                "  • Most-changed files (churn hotspots = refactor candidates)\n"
+                "  • Largest single commits (risk signal)\n"
+                "  • Files changed together frequently (coupling)\n"
+                "STEP 6 — write_file GIT_ACTIVITY_REPORT.md with:\n"
+                "  Contributor summary table, weekly activity chart (ASCII), top 10 hotspot files, coupling analysis, recommendations.\n"
+                "DONE: GIT_ACTIVITY_REPORT.md written."
+            ),
+        },
+        {
+            "id": "license-check", "name": "License Check", "category": "DevOps", "icon": "⚖️",
+            "description": "Scan all dependency licenses for incompatibilities and output a compliance report.",
+            "browser": False,
+            "task_template": (
+                "▶ Q1 · Security Auditor + G3 · Governance active.\n\n"
+                "Scan all dependency licenses for incompatibilities and produce a compliance report.\n\n"
+                "STEP 1 — Read all dependency manifests (package.json, requirements.txt, pyproject.toml, go.mod).\n"
+                "STEP 2 — Run license extraction:\n"
+                "  Node: npx license-checker --json --out licenses.json\n"
+                "  Python: pip-licenses --format json\n"
+                "  Go: go-licenses report ./...\n"
+                "STEP 3 — Read the project's own LICENSE file to determine its type (MIT/Apache/GPL/Proprietary).\n"
+                "STEP 4 — Flag incompatibilities:\n"
+                "  • GPL/AGPL in any commercial or MIT/Apache project → RED: copyleft contamination risk\n"
+                "  • LGPL → YELLOW: dynamic linking required, review needed\n"
+                "  • No license / Unknown → RED: cannot legally use\n"
+                "  • CC-BY-SA / CC-NC → YELLOW: review terms\n"
+                "STEP 5 — write_file LICENSE_COMPLIANCE_REPORT.md with:\n"
+                "  Project license, dependency count, RED/YELLOW/GREEN table, recommended actions.\n"
+                "DONE: Compliance report written."
+            ),
+        },
         # ── Browser Automation (AIO-NUI) ───────────────────
-        {"id": "web-research",    "name": "Web Research",      "category": "Browser",       "icon": "🌐",
-         "description": "Autonomously research a topic on the web, aggregate findings, and write a structured report.",
-         "browser": True,
-         "default_url": "https://www.google.com",
-         "task_template": "Research {topic} thoroughly. Visit multiple authoritative sources. Extract key facts, recent developments, and synthesize a comprehensive summary."},
-        {"id": "competitive-analysis","name": "Competitive Analysis","category": "Browser","icon": "🔭",
-         "description": "Browse competitor sites and GitHub repos to generate a structured competitive landscape.",
-         "browser": True,
-         "default_url": "https://github.com",
-         "task_template": "Perform a competitive analysis for {topic}. Find the top 5 competitors, analyze their features, pricing, and positioning. Output a structured comparison table."},
-        {"id": "site-tester",     "name": "Site Tester",       "category": "Browser",       "icon": "🧪",
-         "description": "Navigate and interact with a website autonomously to test flows and report issues.",
-         "browser": True,
-         "default_url": "http://localhost:3000",
-         "task_template": "Test the website at {url}. Click through all main navigation items, submit any visible forms with test data, screenshot any errors, and write a test report."},
-        {"id": "data-harvester",  "name": "Data Harvester",   "category": "Browser",       "icon": "🌾",
-         "description": "Scrape structured data from websites and export to JSON/CSV in the project directory.",
-         "browser": True,
-         "default_url": "https://www.google.com",
-         "task_template": "Harvest structured data about {topic} from authoritative web sources. Export results as a clean JSON array saved to data/harvested.json in the project."},
-        {"id": "visual-regression","name": "Visual Regression","category": "Browser",      "icon": "🖊️",
-         "description": "Screenshot all key pages of a web app and flag visual anomalies vs baseline.",
-         "browser": True,
-         "default_url": "http://localhost:3000",
-         "task_template": "Perform visual regression testing on the site at {url}. Capture full-page screenshots of the homepage, main sections, and any login/signup flows. Note any visual issues."},
-        {"id": "api-explorer",    "name": "API Explorer",     "category": "Browser",       "icon": "🔎",
-         "description": "Browse API documentation pages and generate client code snippets for key endpoints.",
-         "browser": True,
-         "default_url": "https://docs.github.com",
-         "task_template": "Explore the API documentation at {url}. Identify the most important endpoints, their request/response schemas, and generate Python client code examples for each."},
+        {
+            "id": "web-research", "name": "Web Research", "category": "Browser", "icon": "🌐",
+            "description": "Autonomously research a topic on the web, aggregate findings, and write a structured report.",
+            "browser": True,
+            "default_url": "https://www.google.com",
+            "task_template": "Research the following topic thoroughly across multiple authoritative sources. Extract key facts, recent developments, expert opinions, and data points. Synthesize everything into a structured report with an executive summary, key findings, and sources.\n\nTOPIC: ",
+        },
+        {
+            "id": "competitive-analysis", "name": "Competitive Analysis", "category": "Browser", "icon": "🔭",
+            "description": "Browse competitor sites and GitHub repos to generate a structured competitive landscape.",
+            "browser": True,
+            "default_url": "https://github.com",
+            "task_template": "Perform a competitive analysis. Find the top 5 competitors, visit their sites and GitHub repos, analyze features, pricing, positioning, tech stack, and recent activity. Output a structured comparison table with strengths, weaknesses, and market gaps.\n\nPRODUCT/SPACE: ",
+        },
+        {
+            "id": "site-tester", "name": "Site Tester", "category": "Browser", "icon": "🧪",
+            "description": "Navigate and interact with a website autonomously to test flows and report issues.",
+            "browser": True,
+            "default_url": "http://localhost:3000",
+            "task_template": "Test this website thoroughly. Navigate all main routes, click all buttons and links, submit forms with valid and invalid data, check for console errors, verify responsive layout, and test any auth flows. Write a detailed QA report with screenshots of any issues found.\n\nURL: ",
+        },
+        {
+            "id": "data-harvester", "name": "Data Harvester", "category": "Browser", "icon": "🌾",
+            "description": "Scrape structured data from websites and export to JSON/CSV in the project directory.",
+            "browser": True,
+            "default_url": "https://www.google.com",
+            "task_template": "Harvest structured data from web sources. Navigate relevant pages, extract all structured data (tables, lists, cards), clean and normalize it, then save as a JSON array to data/harvested.json and a CSV to data/harvested.csv.\n\nDATA TARGET: ",
+        },
+        {
+            "id": "visual-regression", "name": "Visual Regression", "category": "Browser", "icon": "🖊️",
+            "description": "Screenshot all key pages of a web app and flag visual anomalies vs baseline.",
+            "browser": True,
+            "default_url": "http://localhost:3000",
+            "task_template": "Perform visual regression testing. Capture full-page screenshots of the homepage, all main navigation destinations, mobile viewport (375px wide), and any modal/overlay states. Compare against any existing baselines and flag visual regressions, layout breaks, or missing content.\n\nSITE URL: ",
+        },
+        {
+            "id": "api-explorer", "name": "API Explorer", "category": "Browser", "icon": "🔎",
+            "description": "Browse API documentation pages and generate client code snippets for key endpoints.",
+            "browser": True,
+            "default_url": "https://docs.github.com",
+            "task_template": "Explore the API documentation at the given URL. Identify the most important endpoints, extract their request/response schemas, auth methods, and rate limits. Generate Python and JavaScript client code examples for the top 10 most useful endpoints.\n\nDOCS URL: ",
+        },
         # ── Intelligence & Analysis ──────────────────────
-        {"id": "tech-scout",      "name": "Tech Stack Scout", "category": "Intelligence",  "icon": "🚀",
-         "description": "Discover and evaluate emerging tools, libraries, and frameworks for the project stack.",
-         "browser": True,
-         "default_url": "https://github.com/trending",
-         "task_template": "Scout for the best emerging {topic} tools and libraries on GitHub trending, Hacker News, and relevant subreddits. Rank and summarize the top 10 with pros/cons."},
-        {"id": "report-builder",  "name": "Report Builder",   "category": "Intelligence",  "icon": "📊",
-         "description": "Generate an executive summary report from code analysis, git stats, and project metrics.",
-         "browser": False},
+        {
+            "id": "tech-scout", "name": "Tech Stack Scout", "category": "Intelligence", "icon": "🚀",
+            "description": "Discover and evaluate emerging tools, libraries, and frameworks for the project stack.",
+            "browser": True,
+            "default_url": "https://github.com/trending",
+            "task_template": "Scout for emerging tools and libraries relevant to this project's stack. Check GitHub Trending, Hacker News (news.ycombinator.com), and npm/PyPI trending. For each candidate tool: evaluate maturity, community size, performance benchmarks, and fit for the project. Rank the top 10 with pros/cons and a recommendation.\n\nSTACK/TOPIC: ",
+        },
+        {
+            "id": "report-builder", "name": "Report Builder", "category": "Intelligence", "icon": "📊",
+            "description": "Generate an executive summary report from code analysis, git stats, and project metrics.",
+            "browser": False,
+            "task_template": (
+                "▶ D4 · Data Engineer + A5 · Architecture Quality Guardian active.\n\n"
+                "Generate a comprehensive executive summary report for this project.\n\n"
+                "STEP 1 — Project overview: read_file README.md, package.json/pyproject.toml/go.mod.\n"
+                "STEP 2 — Codebase metrics:\n"
+                "  run_command: find . -name '*.py' -o -name '*.ts' -o -name '*.js' -o -name '*.go' | xargs wc -l 2>/dev/null | tail -1\n"
+                "  run_command: git log --oneline | wc -l  (total commits)\n"
+                "  run_command: git shortlog -sn --no-merges | head -10  (top contributors)\n"
+                "STEP 3 — Health indicators:\n"
+                "  run_command: git log --since='30 days ago' --oneline | wc -l  (30-day velocity)\n"
+                "  Check for test files: search_files 'def test_' or 'it(' or 'describe('\n"
+                "  Check for CI config: list_directory .github/workflows\n"
+                "STEP 4 — Dependency count and staleness:\n"
+                "  Count deps from manifest. Run outdated check.\n"
+                "STEP 5 — write_file PROJECT_REPORT.md with:\n"
+                "  Executive Summary, Health Score (0-100), Codebase Metrics table,\n"
+                "  30-Day Velocity, Test Coverage estimate, Risk Factors, Top Recommendations.\n"
+                "DONE: PROJECT_REPORT.md written with full analysis."
+            ),
+        },
     ]
 
 
@@ -984,16 +1298,29 @@ async def chat_stream(req: ChatStreamRequest):
                 if req.slm_context:
                     effective_message = f"[SLM-v3 ROLE CONTEXT]\n{req.slm_context}\n\n[USER REQUEST]\n{req.message}"
 
-                from open_codex.agents.coding_agent import CodingAgent
-                agent = CodingAgent(caller)
-                for event in agent.run(effective_message, req.project_dir, max_steps=req.max_steps):
-                    if stop_event.is_set():
-                        loop.call_soon_threadsafe(
-                            queue.put_nowait,
-                            json.dumps({"type": "aborted", "stream_id": stream_id})
-                        )
-                        break
-                    loop.call_soon_threadsafe(queue.put_nowait, json.dumps(event))
+                if req.team_mode:
+                    # ── SLM Multi-agent swarm (TeamAgent) ─────────────────────
+                    from open_codex.agents.team_agent import TeamAgent
+                    agent = TeamAgent(caller, max_workers=4)
+                    for event in agent.run(effective_message, req.project_dir, max_steps=req.max_steps):
+                        if stop_event.is_set():
+                            loop.call_soon_threadsafe(
+                                queue.put_nowait,
+                                json.dumps({"type": "aborted", "stream_id": stream_id})
+                            )
+                            break
+                        loop.call_soon_threadsafe(queue.put_nowait, json.dumps(event))
+                else:
+                    from open_codex.agents.coding_agent import CodingAgent
+                    agent = CodingAgent(caller)
+                    for event in agent.run(effective_message, req.project_dir, max_steps=req.max_steps):
+                        if stop_event.is_set():
+                            loop.call_soon_threadsafe(
+                                queue.put_nowait,
+                                json.dumps({"type": "aborted", "stream_id": stream_id})
+                            )
+                            break
+                        loop.call_soon_threadsafe(queue.put_nowait, json.dumps(event))
         except Exception as e:
             loop.call_soon_threadsafe(
                 queue.put_nowait,
@@ -1121,8 +1448,24 @@ async def provider_health(provider: str, host: str = None, api_key: str = None):
             )
             return agent.health()
 
+        elif provider == "huggingface":
+            token = api_key or os.getenv("HUGGINGFACE_API_TOKEN", "")
+            if not token:
+                return {"ok": False, "hint": "HUGGINGFACE_API_TOKEN not set. Add it in Settings."}
+            try:
+                import urllib.request
+                req = urllib.request.Request(
+                    "https://huggingface.co/api/whoami",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = json.loads(resp.read())
+                return {"ok": True, "hint": None, "models": [], "user": data.get("name", "")}
+            except Exception as e:
+                return {"ok": False, "hint": f"HuggingFace API error: {e}"}
+
         else:
-            raise HTTPException(400, f"Unknown provider: {provider}")
+            return {"ok": False, "hint": f"Unknown provider: {provider}"}
 
     except HTTPException:
         raise

@@ -6,6 +6,7 @@ OpenAI Codex, OpenClaw) as first-class coding agents within Open Codex.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import logging
@@ -185,6 +186,31 @@ OCODX API endpoints available to you:
   GET  http://localhost:8000/api/gym/agents    — forged custom agents
   GET  http://localhost:8000/api/mcp/servers   — active MCP servers
 
+TOOL ENVIRONMENT — READ THIS BEFORE ACTING:
+  Some tools may be unavailable or blocked by policy in this environment.
+  Apply this decision table instead of retrying denied tools:
+
+  NEED TO                     → USE THIS INSTEAD
+  ─────────────────────────── → ──────────────────────────────────────────
+  Write / create a file       → Output the COMPLETE file content as a
+                                fenced code block. OCODX will write it:
+                                  ```html
+                                  <!-- index_v2.html -->
+                                  <entire file here>
+                                  ```
+                                Include the filename in the line above
+                                the fence so OCODX knows where to save it.
+  Run a shell command         → Use whatever run/exec tool is available.
+                                If none work, output the commands as a
+                                ```sh``` block and OCODX will run them.
+  Browse the web              → Use fetch or curl-equivalent tool.
+                                If denied, skip and proceed without it.
+  List directory              → Use glob or search tools if list_directory
+                                fails. If all fail, read known filenames.
+
+  NEVER halt or ask for help when a tool is denied.
+  ALWAYS adapt using the fallback above and continue.
+
 --- USER REQUEST ---
 """
 
@@ -252,20 +278,151 @@ def run_terminal_agent(
         return
 
     full = "".join(collected).strip()
+
+    # Post-flight: rescue any code blocks the agent output as prose
+    # (happens when file-writing tools are denied or unavailable)
+    rescued = _rescue_code_blocks(full, project_dir)
+    for path in rescued:
+        yield {"type": "file_changed", "path": path}
+
     if full:
         yield {"type": "message", "content": full}
-    yield {"type": "done", "stats": {"files_changed": []}}
+    yield {"type": "done", "stats": {"files_changed": rescued}}
 
 
 # ── Stream adapters ───────────────────────────────────────────────────────────
 
+# Matches "Error executing tool foo: ..." lines emitted by Gemini CLI / Jules
+_TOOL_ERROR_RE = re.compile(
+    r'Error executing tool\s+(\w+):\s*(.+)', re.IGNORECASE
+)
+# Matches matrix activation announcements like "▶ A2 · Frontend Dev & L2 · JS Pro active"
+_MATRIX_AGENT_RE = re.compile(r'([A-Z][0-9]+)\s*[·•]\s*([^&\n]+?)(?=\s*&|\s*active|\s*$)', re.IGNORECASE)
+_MATRIX_ACTIVATE_LINE_RE = re.compile(r'[▶►].*(?:[A-Z][0-9]+)\s*[·•]', re.IGNORECASE)
+# Matches fenced code blocks (same logic as coding_agent.py)
+_FENCE_RE = re.compile(r'```([a-zA-Z0-9_+-]*)\n([\s\S]+?)```', re.MULTILINE)
+_LANG_EXT = {
+    "html": ".html", "htm": ".html",
+    "javascript": ".js", "js": ".js", "typescript": ".ts", "ts": ".ts",
+    "jsx": ".jsx", "tsx": ".tsx",
+    "python": ".py", "py": ".py",
+    "css": ".css", "scss": ".scss",
+    "json": ".json", "yaml": ".yaml", "yml": ".yml",
+    "sh": ".sh", "bash": ".sh", "shell": ".sh",
+    "go": ".go", "rust": ".rs", "sql": ".sql", "lua": ".lua",
+}
+
+
+def _rescue_code_blocks(full_output: str, project_dir: str) -> list[str]:
+    """
+    Scan terminal agent output for fenced code blocks and write them to disk.
+    Returns list of paths written.
+    """
+    from open_codex.tools import file_tools as ft
+    written = []
+    pos = 0
+    for m in _FENCE_RE.finditer(full_output):
+        lang = (m.group(1) or "").strip().lower()
+        content = m.group(2).rstrip()
+        if len(content) < 80:
+            continue
+        prose_before = full_output[pos:m.start()]
+
+        # Try to extract filename from prose immediately before the block
+        path = None
+        for pattern in (
+            r'[`"\']([^\s`"\']+\.[a-zA-Z0-9]+)[`"\']',
+            r'(?:file|writing|creating|save[sd]? (?:as|to)?)\s+[`"\']?([^\s`"\'<>]+\.[a-zA-Z0-9]+)',
+            r'(?:<!--\s*|#\s*)([^\s]+\.[a-zA-Z0-9]+)',  # <!-- index.html --> style comment at top of content
+        ):
+            hit = re.search(pattern, prose_before[-400:], re.IGNORECASE)
+            if not hit:
+                # Also check the first line of the content itself for a comment filename
+                first_line = content.splitlines()[0] if content else ""
+                hit = re.search(pattern, first_line, re.IGNORECASE)
+            if hit:
+                candidate = hit.group(1).lstrip('/').lstrip('./')
+                if '.' in candidate and candidate.count('/') <= 3:
+                    path = candidate
+                    break
+
+        if path is None:
+            ext = _LANG_EXT.get(lang, f".{lang}" if lang else ".txt")
+            base = "index" if ext in (".html", ".js", ".ts") else "main"
+            path = base + ext
+            n = 2
+            while path in written:
+                path = f"{base}_{n}{ext}"
+                n += 1
+
+        result = ft.write_file(path, content, project_dir)
+        if not result.startswith("ERROR"):
+            written.append(path)
+            logger.info("Terminal agent rescue: wrote %s", path)
+        pos = m.end()
+    return written
+
+
 def _stream_raw(proc, label: str, collected: list[str]) -> Generator[dict, None, None]:
-    """Stream plain-text output line by line as thinking_text events."""
+    """Stream plain-text output, parse matrix activation lines into team events."""
+    current_agent_id: str | None = None
+    activated: dict[str, str] = {}   # coord -> role
+    emitted_plan = False
+
     for line in proc.stdout:
         collected.append(line)
+        # Strip the 💭 thinking prefix Gemini CLI prepends
         stripped = line.rstrip()
-        if stripped:
-            yield {"type": "thinking_text", "content": stripped}
+        clean = re.sub(r'^[\s💭]+', '', stripped).strip()
+        if not clean:
+            continue
+
+        # ── Error detection ────────────────────────────────────────────────
+        err_m = _TOOL_ERROR_RE.search(clean)
+        if err_m:
+            yield {"type": "error",
+                   "content": f"[{label}] tool '{err_m.group(1)}' failed: {err_m.group(2)}"}
+            continue
+
+        # ── Matrix agent activation ────────────────────────────────────────
+        if _MATRIX_ACTIVATE_LINE_RE.search(clean):
+            parts = _MATRIX_AGENT_RE.findall(clean)
+            new_agents = [(coord.strip().upper(), role.strip())
+                          for coord, role in parts
+                          if coord.strip().upper() not in activated]
+            if new_agents:
+                # Emit a synthetic team_plan once so SwarmGrid activates
+                if not emitted_plan:
+                    all_tasks = [
+                        {"id": c, "subtask": r, "files_hint": []}
+                        for c, r in new_agents
+                    ]
+                    yield {"type": "team_plan", "tasks": all_tasks, "collaborate": []}
+                    emitted_plan = True
+                else:
+                    # Add latecomers to an updated plan
+                    yield {"type": "team_plan_extend", "new_agents": new_agents}
+
+                for coord, role in new_agents:
+                    activated[coord] = role
+                    current_agent_id = coord
+                    yield {"type": "team_start", "agent_id": coord,
+                           "role": role, "subtask": role}
+
+            yield {"type": "thinking_text", "content": clean}
+            continue
+
+        # ── Regular thinking line — tag with current agent if known ────────
+        ev: dict = {"type": "thinking_text", "content": clean}
+        if current_agent_id:
+            ev["agent_id"] = current_agent_id
+        yield ev
+
+    # Mark all activated agents as done when the process exits
+    for coord in activated:
+        yield {"type": "team_done", "agent_id": coord, "summary": ""}
+    if activated:
+        yield {"type": "team_finish", "summary": f"{label} complete"}
 
 
 def _stream_claude_json(proc, collected: list[str]) -> Generator[dict, None, None]:

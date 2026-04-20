@@ -131,15 +131,29 @@ interface AgentEvent {
   type: 'start' | 'thinking' | 'thinking_text' | 'tool_call' | 'tool_result'
        | 'file_changed' | 'message' | 'done' | 'error' | 'stream_id' | 'aborted'
        | 'gym_agent_forged'
+       | 'team_decomposing' | 'team_plan' | 'team_start' | 'team_done'
+       | 'team_collab' | 'team_finish'
   content?: string
   tool?: string
   args?: Record<string, unknown>
   result?: string
   path?: string
-  stats?: { files_changed: string[]; added?: number; removed?: number }
+  stats?: { files_changed: string[]; added?: number; removed?: number; team_mode?: boolean }
   prompt?: string
   stream_id?: string
   agent?: Record<string, string>
+  // team events
+  agent_id?: string
+  role?: string
+  subtask?: string
+  files_hint?: string[]
+  tasks?: { id: string; subtask: string; files_hint?: string[] }[]
+  collaborate?: { after: string[]; synthesizer: string; task: string }[]
+  synthesizer?: string
+  inputs?: string[]
+  msg?: string
+  summary?: string
+  task?: string
 }
 
 interface Message {
@@ -305,6 +319,152 @@ function clusterBorder(cluster: string) {
   return `hsla(${h}, 60%, 55%, 0.2)`
 }
 
+// ── SwarmGrid — live per-agent team panel ─────────────────────────────────────
+
+const AGENT_HUE: Record<string, number> = {
+  ARC: 210, LNG: 160, QSP: 16, OPS: 44, AID: 285,
+}
+
+interface AgentCardState {
+  id: string
+  role: string
+  subtask: string
+  status: 'waiting' | 'active' | 'done' | 'error'
+  activity: string
+  lastTool: string | null
+  filesChanged: string[]
+  steps: number
+}
+
+function SwarmGrid({ events, running }: { events: AgentEvent[]; running: boolean }) {
+  // Build initial agent roster from team_plan tasks if available,
+  // otherwise fall back to team_start events (terminal agent path)
+  const plan = events.find(e => e.type === 'team_plan')
+  const hasAnyTeamEvent = events.some(e => e.type === 'team_start' || e.type === 'team_plan')
+  if (!hasAnyTeamEvent) return null
+
+  const agents: Record<string, AgentCardState> = {}
+  if (plan?.tasks) {
+    for (const t of plan.tasks) {
+      agents[t.id] = {
+        id: t.id, role: '', subtask: t.subtask,
+        status: 'waiting', activity: '', lastTool: null,
+        filesChanged: [], steps: 0,
+      }
+    }
+  }
+
+  for (const ev of events) {
+    const aid = ev.agent_id
+    if (!aid || aid.endsWith('_SYNTH')) continue
+    const a = agents[aid]
+    if (!a) continue
+    if (ev.type === 'team_start') {
+      // upsert — terminal agents announce agents via team_start without a prior plan
+      if (!agents[aid]) {
+        agents[aid] = { id: aid, role: ev.role ?? aid, subtask: ev.subtask ?? ev.role ?? '',
+                        status: 'waiting', activity: '', lastTool: null, filesChanged: [], steps: 0 }
+      }
+      agents[aid].status = 'active'
+      if (ev.role) agents[aid].role = ev.role
+      if (ev.subtask) agents[aid].subtask = ev.subtask
+    }
+    if (ev.type === 'thinking_text' && ev.content) a.activity = ev.content.slice(0, 90)
+    if (ev.type === 'tool_call')     { a.lastTool = ev.tool ?? null; a.steps++ }
+    if (ev.type === 'file_changed' && ev.path && !a.filesChanged.includes(ev.path))
+      a.filesChanged.push(ev.path)
+    if (ev.type === 'team_done')     a.status = 'done'
+    if (ev.type === 'error')         { a.status = 'error'; if (ev.content) a.activity = ev.content.slice(0, 90) }
+  }
+
+  const agentList = Object.values(agents)
+  const collabs = events.filter(e => e.type === 'team_collab')
+  const finished = events.some(e => e.type === 'team_finish')
+  const totalFiles = agentList.reduce((s, a) => s + a.filesChanged.length, 0)
+
+  return (
+    <div className="swarm-grid">
+      {/* Agent cards */}
+      {agentList.map(a => {
+        const hue = AGENT_HUE[a.id] ?? 262
+        return (
+          <div
+            key={a.id}
+            className={`swarm-card swarm-card--${a.status}`}
+            style={{ '--card-hue': hue } as React.CSSProperties}
+          >
+            <div className="swarm-card-head">
+              <span className="swarm-badge">{a.id}</span>
+              <span className="swarm-role">{a.role || a.subtask.split(' ').slice(0, 4).join(' ') + '…'}</span>
+              <span className="swarm-status-dot">
+                {a.status === 'active'   && <span className="swarm-spinner" />}
+                {a.status === 'done'     && <span className="swarm-check">✓</span>}
+                {a.status === 'error'    && <span className="swarm-x">✗</span>}
+                {a.status === 'waiting'  && <span className="swarm-idle">·</span>}
+              </span>
+            </div>
+            <div className="swarm-subtask">{a.subtask}</div>
+            <div className="swarm-activity">
+              {a.activity
+                ? a.activity
+                : a.status === 'waiting' ? 'Queued…'
+                : a.status === 'active'  ? 'Working…'
+                : ''}
+            </div>
+            {a.lastTool && a.status === 'active' && (
+              <div className="swarm-tool-line">⚙ {a.lastTool}</div>
+            )}
+            <div className="swarm-card-foot">
+              {a.steps > 0 && <span className="swarm-steps">{a.steps} step{a.steps !== 1 ? 's' : ''}</span>}
+              {a.filesChanged.length > 0 && (
+                <span className="swarm-file-count">✏ {a.filesChanged.length}</span>
+              )}
+            </div>
+          </div>
+        )
+      })}
+
+      {/* Synthesis cards */}
+      {collabs.map((e, i) => {
+        const synthId = e.synthesizer + '_SYNTH'
+        const synthActivity = events
+          .filter(ev => ev.agent_id === synthId && ev.type === 'thinking_text')
+          .slice(-1)[0]?.content ?? ''
+        const synthDone = events.some(ev => ev.agent_id === synthId && ev.type === 'message')
+        return (
+          <div key={`synth-${i}`} className={`swarm-card swarm-card--synth${synthDone ? ' swarm-card--done' : ' swarm-card--active'}`}>
+            <div className="swarm-card-head">
+              <span className="swarm-badge swarm-badge--synth">{e.synthesizer}</span>
+              <span className="swarm-role">Synthesis</span>
+              {!synthDone && <span className="swarm-spinner" />}
+              {synthDone && <span className="swarm-check">✓</span>}
+            </div>
+            <div className="swarm-subtask">{e.task}</div>
+            {synthActivity && <div className="swarm-activity">{synthActivity.slice(0, 90)}</div>}
+            <div className="swarm-synth-inputs">from: {e.inputs?.join(', ')}</div>
+          </div>
+        )
+      })}
+
+      {/* Finish banner */}
+      {finished && (
+        <div className="swarm-finish">
+          <span className="swarm-finish-icon">⬡</span>
+          <span className="swarm-finish-label">Swarm complete</span>
+          {totalFiles > 0 && <span className="swarm-finish-stat">· {totalFiles} file{totalFiles !== 1 ? 's' : ''} changed</span>}
+        </div>
+      )}
+
+      {/* Live decomposing state before plan arrives */}
+      {running && !finished && agentList.every(a => a.status === 'waiting') && (
+        <div className="swarm-decomposing">
+          <span className="swarm-spinner" /> Distributing tasks across matrix nodes…
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -339,6 +499,7 @@ export default function App() {
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
   const [activeStreamId, setActiveStreamId] = useState<string | null>(null)
+  const [teamMode, setTeamMode] = useState<boolean>(() => store('oc_team_mode', false))
   const [showSettings, setShowSettings] = useState(false)
   const [addProjectInput, setAddProjectInput] = useState('')
   const [showAddProject, setShowAddProject] = useState(false)
@@ -464,6 +625,7 @@ export default function App() {
 
   // ── Persist settings ───────────────────────────────────────────────────────
   useEffect(() => { storeSet('oc_agent', agentType) }, [agentType])
+  useEffect(() => { storeSet('oc_team_mode', teamMode) }, [teamMode])
   useEffect(() => { storeSet('oc_model', model) }, [model])
   useEffect(() => { storeSet('oc_apikey', apiKey) }, [apiKey])
   useEffect(() => { storeSet('oc_geminikey', geminiApiKey) }, [geminiApiKey])
@@ -841,6 +1003,7 @@ export default function App() {
                  : undefined,
           thread_id: tid,
           slm_context: slmContext,
+          team_mode: teamMode,
         }),
       })
 
@@ -875,7 +1038,11 @@ export default function App() {
             messages: t.messages.map(m => m.id === aId ? {
               ...m,
               events: [...m.events, ev],
-              content: ev.type === 'message' ? ev.content ?? m.content : m.content,
+              content: ev.type === 'message'
+                ? ev.content ?? m.content
+                : ev.type === 'team_finish'
+                  ? (ev.summary ?? m.content)
+                  : m.content,
               done: ev.type === 'done',
               stats: ev.type === 'done' ? ev.stats : m.stats,
             } : m),
@@ -1579,6 +1746,56 @@ export default function App() {
         )
       case 'error':
         return <div key={i} className="ev-error">⚠️ {ev.content}</div>
+      case 'team_decomposing':
+        return <div key={i} className="ev-team-decomposing">⬡ {ev.msg ?? 'Decomposing task across specialist agents…'}</div>
+      case 'team_plan':
+        return (
+          <details key={i} className="ev-team-plan" open>
+            <summary><span className="ev-team-icon">⬡</span> Swarm Plan — {ev.tasks?.length ?? 0} agents{(ev.collaborate?.length ?? 0) > 0 ? ` + ${ev.collaborate!.length} synthesis` : ''}</summary>
+            <div className="ev-team-plan-tasks">
+              {ev.tasks?.map(t => (
+                <div key={t.id} className="ev-team-task-row">
+                  <span className="ev-team-badge">{t.id}</span>
+                  <span className="ev-team-subtask">{t.subtask}</span>
+                  {t.files_hint && t.files_hint.length > 0 && <span className="ev-team-hint">{t.files_hint.join(', ')}</span>}
+                </div>
+              ))}
+            </div>
+          </details>
+        )
+      case 'team_start':
+        return (
+          <div key={i} className="ev-team-start">
+            <span className="ev-team-badge ev-team-badge--active">{ev.agent_id}</span>
+            <span className="ev-team-role">{ev.role}</span>
+            <span className="ev-team-arrow">→</span>
+            <span className="ev-team-subtask">{ev.subtask}</span>
+          </div>
+        )
+      case 'team_done':
+        return (
+          <div key={i} className="ev-team-done">
+            <span className="ev-team-badge ev-team-badge--done">{ev.agent_id}</span>
+            <span className="ev-team-done-label">✓ done</span>
+          </div>
+        )
+      case 'team_collab':
+        return (
+          <div key={i} className="ev-team-collab">
+            <span className="ev-team-badge ev-team-badge--synth">{ev.synthesizer}</span>
+            <span className="ev-team-synth-label">synthesis</span>
+            <span className="ev-team-inputs">[{ev.inputs?.join(' + ')}]</span>
+            <span className="ev-team-collab-task">{ev.task}</span>
+          </div>
+        )
+      case 'team_finish':
+        return (
+          <div key={i} className="ev-team-finish">
+            <span className="ev-team-finish-icon">⬡</span>
+            <span className="ev-team-finish-label">Swarm complete</span>
+            {ev.summary && <span className="ev-team-finish-summary">{ev.summary}</span>}
+          </div>
+        )
       default: return null
     }
   }
@@ -3082,33 +3299,46 @@ export default function App() {
                     <div className="assistant-msg-row">
                       <div className="assistant-bubble">
                         {/* Agent events */}
-                        {(msg.events.length > 0 || !msg.done) && (
-                          <details className="steps-group">
-                            <summary className="steps-summary">
-                              {!msg.done ? (
-                                <>
-                                  <span className="thinking-spinner steps-spinner" />
-                                  <span className="steps-label">Working…</span>
-                                </>
-                              ) : (
-                                <>
-                                  <span className="steps-chevron">▶</span>
-                                  <span className="steps-label">
-                                    {msg.events.filter(e => e.type === 'tool_call').length} steps
-                                  </span>
-                                  {msg.events.filter(e => e.type === 'file_changed').length > 0 && (
-                                    <span className="steps-files">
-                                      · {msg.events.filter(e => e.type === 'file_changed').length} file{msg.events.filter(e => e.type === 'file_changed').length !== 1 ? 's' : ''} changed
-                                    </span>
-                                  )}
-                                </>
-                              )}
-                            </summary>
-                            <div className="steps-content">
-                              {msg.events.map((ev, i) => renderEvent(ev, i))}
-                            </div>
-                          </details>
-                        )}
+                        {(msg.events.length > 0 || !msg.done) && (() => {
+                          const isTeam = msg.events.some(e => e.type === 'team_plan' || e.type === 'team_decomposing' || e.type === 'team_start')
+                          if (isTeam) {
+                            return (
+                              <div className="swarm-wrap">
+                                <div className="swarm-header">
+                                  {!msg.done
+                                    ? <><span className="thinking-spinner swarm-hdr-spin" /><span className="swarm-hdr-label">Swarm running — {msg.events.filter(e => e.type === 'team_start').length} agent{msg.events.filter(e => e.type === 'team_start').length !== 1 ? 's' : ''} active</span></>
+                                    : <><span className="swarm-hdr-done">⬡</span><span className="swarm-hdr-label">{msg.events.filter(e => e.type === 'team_start').length} agents · {msg.events.filter(e => e.type === 'file_changed').length} files changed</span></>
+                                  }
+                                </div>
+                                <SwarmGrid events={msg.events} running={!msg.done} />
+                                {/* Non-team events (errors, pre-plan steps) still shown below */}
+                                {msg.events.filter(e =>
+                                  e.type === 'error' && !e.agent_id
+                                ).map((ev, i) => renderEvent(ev, i))}
+                              </div>
+                            )
+                          }
+                          return (
+                            <details className="steps-group" open={false}>
+                              <summary className="steps-summary">
+                                {!msg.done ? (
+                                  <><span className="thinking-spinner steps-spinner" /><span className="steps-label">Working…</span></>
+                                ) : (
+                                  <>
+                                    <span className="steps-chevron">▶</span>
+                                    <span className="steps-label">{msg.events.filter(e => e.type === 'tool_call').length} steps</span>
+                                    {msg.events.filter(e => e.type === 'file_changed').length > 0 && (
+                                      <span className="steps-files">· {msg.events.filter(e => e.type === 'file_changed').length} file{msg.events.filter(e => e.type === 'file_changed').length !== 1 ? 's' : ''} changed</span>
+                                    )}
+                                  </>
+                                )}
+                              </summary>
+                              <div className="steps-content">
+                                {msg.events.map((ev, i) => renderEvent(ev, i))}
+                              </div>
+                            </details>
+                          )
+                        })()}
                         {/* Final message */}
                         {msg.content && (
                           <div className="assistant-text-wrap">
@@ -3214,6 +3444,14 @@ export default function App() {
                 </button>
                 <button id="btn-footer-matrix" className="footer-matrix-btn" onClick={() => togglePanel('matrix')}>
                   ⬡ Matrix
+                </button>
+                <button
+                  id="btn-footer-team"
+                  className={`footer-team-btn ${teamMode ? 'active' : ''}`}
+                  onClick={() => setTeamMode(v => !v)}
+                  title={teamMode ? 'Team Mode ON — click to disable' : 'Enable multi-agent swarm'}
+                >
+                  ⬡⬡ Team{teamMode ? ' ON' : ''}
                 </button>
               </div>
               <div className="footer-right">

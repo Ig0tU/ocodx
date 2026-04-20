@@ -53,6 +53,46 @@ def write_file(path: str, content: str, project_dir: str) -> str:
         return f"ERROR: {e}"
 
 
+def edit_file(path: str, old_string: str, new_string: str, project_dir: str, replace_all: bool = False) -> str:
+    safe = _safe_path(path, project_dir)
+    if not safe:
+        return f"ERROR: Invalid path: {path}"
+    if not os.path.isfile(safe):
+        return f"ERROR: File not found: {path}"
+    try:
+        with open(safe, 'r', encoding='utf-8', errors='replace') as f:
+            original = f.read()
+    except Exception as e:
+        return f"ERROR: {e}"
+
+    if old_string not in original:
+        # Give a useful hint: show nearby content so the model can correct its old_string
+        lines = original.splitlines()
+        hint_lines = lines[:5]
+        return (
+            f"ERROR: old_string not found in {path}. "
+            f"File starts with:\n" + "\n".join(hint_lines) +
+            ("\n..." if len(lines) > 5 else "")
+        )
+
+    count = original.count(old_string)
+    if count > 1 and not replace_all:
+        return (
+            f"ERROR: old_string appears {count} times in {path}. "
+            "Add more surrounding context to make it unique, or set replace_all=true."
+        )
+
+    updated = original.replace(old_string, new_string) if replace_all else original.replace(old_string, new_string, 1)
+    try:
+        with open(safe, 'w', encoding='utf-8') as f:
+            f.write(updated)
+        rel = os.path.relpath(safe, project_dir)
+        replacements = count if replace_all else 1
+        return f"OK: Patched {replacements} occurrence(s) in {rel}"
+    except Exception as e:
+        return f"ERROR: {e}"
+
+
 def list_directory(path: str, project_dir: str) -> str:
     target = project_dir if path in ('.', '') else _safe_path(path, project_dir)
     if not target:

@@ -26,7 +26,12 @@ list_directory  List files/folders in a directory
 read_file       Read a file's contents
   args: {"path": "relative path"}
 
-write_file      Create or fully overwrite a file
+edit_file       Patch an existing file — replace an exact string with a new one
+  args: {"path": "relative path", "old_string": "exact text to find", "new_string": "replacement text"}
+  Optional: {"replace_all": true}  — replace every occurrence instead of just the first
+  Rules: old_string must be unique in the file (add more context if not). Never truncate.
+
+write_file      Create a new file, or fully overwrite when >50% of content changes
   args: {"path": "relative path", "content": "complete file content"}
 
 run_command     Execute a shell command in the project directory
@@ -80,8 +85,64 @@ mcp_call        Call any registered MCP server tool
 
 ACTION_RE = re.compile(r'^ACTION:\s*(\{.+\})\s*$', re.MULTILINE)
 DONE_RE   = re.compile(r'^DONE:\s*(.+)', re.MULTILINE | re.DOTALL)
-# Matches <think>…</think> blocks emitted by thinking/reasoning models
 THINK_RE  = re.compile(r'<think>(.*?)</think>', re.DOTALL)
+
+# Matches fenced code blocks: ```lang\n<content>\n```
+_FENCE_RE = re.compile(r'```([a-zA-Z0-9_+-]*)\n([\s\S]+?)```', re.MULTILINE)
+
+_LANG_EXT = {
+    "html": ".html", "htm": ".html",
+    "javascript": ".js", "js": ".js", "typescript": ".ts", "ts": ".ts",
+    "jsx": ".jsx", "tsx": ".tsx",
+    "python": ".py", "py": ".py",
+    "css": ".css", "scss": ".scss", "sass": ".sass",
+    "json": ".json", "yaml": ".yaml", "yml": ".yml",
+    "go": ".go", "rust": ".rs", "c": ".c", "cpp": ".cpp",
+    "sh": ".sh", "bash": ".sh", "shell": ".sh",
+    "sql": ".sql", "lua": ".lua", "gdscript": ".gd",
+}
+
+
+def _infer_filename(lang: str, prose_before: str, existing_names: set[str]) -> str:
+    """Infer a file path from language hint and surrounding prose."""
+    ext = _LANG_EXT.get(lang.lower(), f".{lang.lower()}" if lang else ".txt")
+
+    # Look for a quoted filename in the prose immediately before the block
+    for pattern in (
+        r'[`"\']([^\s`"\']+\.[a-zA-Z0-9]+)[`"\']',   # `foo.html` or "foo.js"
+        r'\b([\w.-]+' + re.escape(ext) + r')\b',        # bare word matching ext
+    ):
+        m = re.search(pattern, prose_before[-300:])
+        if m:
+            name = m.group(1).lstrip('/').lstrip('./')
+            if '/' not in name or name.count('/') <= 3:
+                return name
+
+    # Default name: index for html/js roots, main otherwise
+    base = "index" if ext in (".html", ".js", ".ts") else "main"
+    candidate = base + ext
+    # Avoid clobbering a name we've already written this session
+    n = 2
+    while candidate in existing_names:
+        candidate = f"{base}_{n}{ext}"
+        n += 1
+    return candidate
+
+
+def _extract_code_files(response: str, written: set[str]) -> list[tuple[str, str]]:
+    """Return [(path, content), ...] for every substantial fenced block in response."""
+    results = []
+    pos = 0
+    for m in _FENCE_RE.finditer(response):
+        lang = (m.group(1) or "").strip()
+        content = m.group(2).rstrip()
+        if len(content) < 80:          # skip tiny snippets
+            continue
+        prose_before = response[pos:m.start()]
+        path = _infer_filename(lang, prose_before, written | {p for p, _ in results})
+        results.append((path, content))
+        pos = m.end()
+    return results
 
 
 def _build_system_prompt(project_dir: str) -> str:
@@ -134,13 +195,20 @@ STEP 2 — READ ALL SOURCE FILES:
 
 STEP 3 — ACT WITH EXPERT JUDGMENT (after all files are read):
   Make real, substantive improvements — not trivial tweaks.
-  Think like a senior engineer who owns this codebase:
-  - "enhance / improve / upgrade": implement features, fix bugs, improve visuals, performance,
-    UX, and code quality — ALL of it, not just one thing. Make it meaningfully better.
-  - "fix bugs": fix every bug you spotted while reading. All of them.
-  - "add X": implement the full feature end-to-end.
-  - "refactor": apply consistent patterns across the whole codebase.
-  Write each changed file with write_file, COMPLETE content every time — never partial.
+  Think like a senior engineer who owns this codebase.
+
+  CHOOSING THE RIGHT WRITE TOOL:
+  - Modifying an existing file → use edit_file with the exact old_string and new_string.
+    Include enough surrounding lines in old_string to make it unique in the file.
+    One edit_file call per logical change. Chain multiple calls for multiple changes.
+  - Creating a new file → use write_file with complete content.
+  - Rewriting >50% of an existing file → write_file is acceptable.
+
+  TASK PATTERNS:
+  - "enhance / improve / upgrade": patch specific sections with edit_file; don't rewrite whole files unless they are entirely new or trivially short.
+  - "fix bugs": edit_file each broken section precisely — surgical, not wholesale.
+  - "add X": add new code via edit_file (insert after the right anchor) or write_file for new files.
+  - "refactor": use edit_file with replace_all=true for renames; write_file when structure changes completely.
 
 STEP 4 — VERIFY:
   After writing files, run the relevant build/test/lint command if one exists.
@@ -151,8 +219,9 @@ STEP 5 — DONE:
 
 DECISION TREE — after each tool result:
   list_directory → read the first source file you see
-  read_file      → if more source files remain, read the next; if all read, start writing
-  write_file     → write next file needing changes, or run build/test if all done
+  read_file      → if more source files remain, read the next; if all read, start patching
+  edit_file      → apply next targeted patch, or run build/test if all changes done
+  write_file     → same as edit_file — continue or run build/test
   run_command    → fix errors if any, otherwise output DONE
 
 OUTPUT FORMAT — ONLY these two lines are valid output, nothing else:
@@ -161,7 +230,8 @@ OUTPUT FORMAT — ONLY these two lines are valid output, nothing else:
 
 HARD RULES:
 - ONE ACTION per response. Wait for RESULT.
-- write_file must always contain the COMPLETE file — never truncated, never a diff.
+- edit_file: old_string must be the EXACT text from the file — copy it character-for-character. Include enough surrounding lines to make it unique.
+- write_file: content must be COMPLETE — never truncated. Only use for new files or near-total rewrites.
 - Never ask questions. Never explain what you are about to do. Just do it.
 - Make real, meaningful improvements. Go deep. Don't stop at the surface.
 - Keep going until the FULL task is complete.
@@ -250,7 +320,20 @@ class CodingAgent:
                 yield {"type": "tool_result", "tool": tool, "result": result_str}
 
                 messages.append({"role": "assistant", "content": response})
-                messages.append({"role": "user",      "content": f"RESULT:\n{result_str}"})
+                if result_str.startswith("ERROR") or result_str.startswith("[exit "):
+                    recovery = (
+                        f"RESULT:\n{result_str}\n\n"
+                        "RECOVERY REQUIRED: That tool call failed. Do NOT repeat it unchanged.\n"
+                        "Apply intelligent heuristics:\n"
+                        "- Tool not found / denied → use a different available tool for the same goal\n"
+                        "- Command failed → analyze the error, adjust the command or use a file tool instead\n"
+                        "- MCP error → fall back to read_file / write_file / run_command equivalents\n"
+                        "- Unknown tool → pick the closest matching tool from AVAILABLE TOOLS above\n"
+                        "Emit your next ACTION using a working alternative approach."
+                    )
+                    messages.append({"role": "user", "content": recovery})
+                else:
+                    messages.append({"role": "user", "content": f"RESULT:\n{result_str}"})
 
             elif done_m:
                 final = done_m.group(1).strip()
@@ -264,21 +347,41 @@ class CodingAgent:
                 return
 
             else:
-                # Model output neither ACTION nor DONE — re-prompt it sharply
-                # rather than accepting prose as a final answer (the "going dumb" bug)
-                if response.strip():
-                    yield {"type": "thinking_text", "content": f"[no ACTION/DONE detected — re-prompting] {response[:200]}"}
-                correction = (
-                    "Your last response was not valid. "
-                    "You MUST output exactly one of:\n"
-                    "  ACTION: {\"tool\": \"...\", \"args\": {...}}\n"
-                    "  DONE: <summary>\n"
-                    "Do NOT write prose or explanations. "
-                    "If you have not yet explored the project, start with:\n"
-                    'ACTION: {"tool": "list_directory", "args": {"path": "."}}'
-                )
-                messages.append({"role": "assistant", "content": response or "(empty)"})
-                messages.append({"role": "user",      "content": correction})
+                # Model output neither ACTION nor DONE.
+                # First: rescue any fenced code blocks it included as prose and
+                # write them to disk automatically — then re-prompt for DONE.
+                extracted = _extract_code_files(response, files_changed)
+                if extracted:
+                    written_paths = []
+                    for path, content in extracted:
+                        result = file_tools.write_file(path, content, project_dir)
+                        if not result.startswith("ERROR"):
+                            files_changed.add(path)
+                            written_paths.append(path)
+                            yield {"type": "file_changed", "path": path}
+                        yield {"type": "tool_result", "tool": "write_file",
+                               "result": result[:500]}
+                    recovery_msg = (
+                        f"Auto-rescued: wrote {written_paths} from your prose output. "
+                        "Now output:\n"
+                        "  DONE: <summary of everything that was written and why>"
+                    )
+                    messages.append({"role": "assistant", "content": response})
+                    messages.append({"role": "user", "content": recovery_msg})
+                else:
+                    if response.strip():
+                        yield {"type": "thinking_text", "content": f"[no ACTION/DONE — re-prompting] {response[:200]}"}
+                    correction = (
+                        "Your last response was not valid. "
+                        "You MUST output exactly one of:\n"
+                        "  ACTION: {\"tool\": \"...\", \"args\": {...}}\n"
+                        "  DONE: <summary>\n"
+                        "Do NOT write prose or explanations. "
+                        "If you have not yet explored the project, start with:\n"
+                        'ACTION: {"tool": "list_directory", "args": {"path": "."}}'
+                    )
+                    messages.append({"role": "assistant", "content": response or "(empty)"})
+                    messages.append({"role": "user",      "content": correction})
                 # continue the loop — do NOT return
 
         if limit != 0:
@@ -292,6 +395,14 @@ class CodingAgent:
             return file_tools.list_directory(args.get("path", "."), project_dir)
         if tool == "read_file":
             return file_tools.read_file(args.get("path", ""), project_dir)
+        if tool == "edit_file":
+            return file_tools.edit_file(
+                args.get("path", ""),
+                args.get("old_string", ""),
+                args.get("new_string", ""),
+                project_dir,
+                args.get("replace_all", False),
+            )
         if tool == "write_file":
             return file_tools.write_file(
                 args.get("path", ""), args.get("content", ""), project_dir

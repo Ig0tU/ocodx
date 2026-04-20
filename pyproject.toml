@@ -1,6 +1,6 @@
 [project]
 name = "open_codex"
-version = "0.1.18"
+version = "0.1.19"
 description = "AI CLI with OSS LLM integration"
 readme = "README.md"
 requires-python = ">=3.11"
