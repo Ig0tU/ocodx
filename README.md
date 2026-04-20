@@ -31,8 +31,6 @@ Designed for deep flow and professional engineering, OCODX introduces a multi-pa
 ### ⬡ Sovereign Liquid Matrix (SLM-v3)
 Access **90+ specialized agentic roles** across 16 logic clusters. Each role (Architecture, DevSecOps, Cloud, etc.) is tuned for precision, allowing you to persist knowledge in a "liquid state" across sub-agentic operations.
 
-<img src="./.github/agent_matrix.png" width="800" alt="Agent Matrix">
-
 ### ⊕ MCP Hub (Model Context Protocol)
 Orchestrate **50+ tools** from a single interface. The OCODX hub connects your AI directly to your workspace:
 - **Filesystem & Shell**: Safe, confirmed execution.
