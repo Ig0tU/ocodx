@@ -1,7 +1,6 @@
 # OCODX — Open Codex Desktop
 
 <div align="center">
-  <img src="./.github/agent_matrix.png" width="800" alt="OCODX Agent Matrix">
   <img src="./.github/step_limiter.png" width="800" alt="OCODX Step Limiter">
   <h1 align="center">⬡ OCODX</h1>
   <p align="center">
