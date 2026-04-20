@@ -122,13 +122,13 @@ INTERNAL EXECUTION PROTOCOL - U1-RCM (runs before every output):
 {TOOLS_DOC}
 
 WORKFLOW:
-1. ALWAYS start by calling list_directory to understand the project structure.
-2. Read relevant files before making changes.
-3. Use write_file to create or modify files (supply the COMPLETE file content).
-4. Run tests or the build command after making changes when applicable.
-5. When finished, output DONE.
+1. ALWAYS start by calling list_directory with path="." — do this IMMEDIATELY, no exceptions.
+2. Read every relevant source file before touching anything.
+3. Use write_file to create or modify files — always supply the COMPLETE file content.
+4. Run build/test commands after changes when applicable.
+5. Keep going until the task is fully done, then output DONE.
 
-OUTPUT FORMAT - use exactly one of these per response:
+OUTPUT FORMAT — you MUST use exactly one of these per response, nothing else:
 
   To call a tool:
   ACTION: {{"tool": "tool_name", "args": {{...}}}}
@@ -136,13 +136,30 @@ OUTPUT FORMAT - use exactly one of these per response:
   To finish:
   DONE: <concise summary of what you changed>
 
+CRITICAL — DO NOT output prose, explanations, markdown, or questions.
+Your ONLY valid outputs are a single ACTION line or a single DONE line.
+If you are unsure, call list_directory and read files — never explain, always act.
+
+EXAMPLES:
+
+  User: fully enhance / improve the game
+  Output: ACTION: {{"tool": "list_directory", "args": {{"path": "."}}}}
+
+  User: add dark mode
+  Output: ACTION: {{"tool": "list_directory", "args": {{"path": "."}}}}
+
+  User: fix all the bugs
+  Output: ACTION: {{"tool": "list_directory", "args": {{"path": "."}}}}
+
+  User: what does this project do?
+  Output: ACTION: {{"tool": "list_directory", "args": {{"path": "."}}}}
+
 HARD RULES:
-- Output only ONE ACTION per response, then wait for the RESULT.
-- Never truncate file content in write_file - always write the full file.
-- Keep changes minimal, correct, and reviewable.
-- Do not ask clarifying questions - infer intent, proceed, report.
-- Prefer composable, idiomatic solutions over clever one-liners.
-- Security-sensitive changes require explicit justification in DONE summary.
+- ONE ACTION per response. Wait for RESULT before next action.
+- Never truncate file content in write_file — always write the full file.
+- Do not ask clarifying questions — infer intent from context, then act.
+- Prefer idiomatic, composable solutions.
+- Security-sensitive changes require justification in the DONE summary.
 """
 
 
@@ -241,13 +258,22 @@ class CodingAgent:
                 return
 
             else:
-                # No structured output — treat whole response as final answer
-                stats = {"files_changed": sorted(files_changed)}
-                if git_tools.is_git_repo(project_dir):
-                    stats.update(git_tools.get_diff_stats(project_dir))
-                yield {"type": "message", "content": response.strip()}
-                yield {"type": "done",    "stats": stats}
-                return
+                # Model output neither ACTION nor DONE — re-prompt it sharply
+                # rather than accepting prose as a final answer (the "going dumb" bug)
+                if response.strip():
+                    yield {"type": "thinking_text", "content": f"[no ACTION/DONE detected — re-prompting] {response[:200]}"}
+                correction = (
+                    "Your last response was not valid. "
+                    "You MUST output exactly one of:\n"
+                    "  ACTION: {\"tool\": \"...\", \"args\": {...}}\n"
+                    "  DONE: <summary>\n"
+                    "Do NOT write prose or explanations. "
+                    "If you have not yet explored the project, start with:\n"
+                    'ACTION: {"tool": "list_directory", "args": {"path": "."}}'
+                )
+                messages.append({"role": "assistant", "content": response or "(empty)"})
+                messages.append({"role": "user",      "content": correction})
+                # continue the loop — do NOT return
 
         if limit != 0:
             yield {"type": "error",  "content": f"Reached max steps ({limit})"}
