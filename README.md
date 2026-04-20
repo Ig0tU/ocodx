@@ -2,6 +2,7 @@
 
 <div align="center">
   <img src="./.github/demo.gif" width="800" alt="OCODX Interface Demo">
+  <img src="./.github/ocodx-still.png" width="800" alt="OCODX Interface Still">
   <h1 align="center">⬡ OCODX</h1>
   <p align="center">The Sovereign Liquid Matrix (SLM-v3) Desktop Interface</p>
   <p align="center">
@@ -48,6 +49,7 @@ AI-native visual layout generation for **YOOtheme Pro**.
 
 - **Hybrid Orchestration**: Seamlessly switch between Local (Ollama/LM Studio) and Cloud (Gemini/Ollama Cloud) providers.
 - **Visual Terminal**: Real-time streaming of shell commands and file changes with one-click approval.
+- **Configurable Step Limiter**: Take full control of agent autonomy with a new slider-based step limiter. Support for up to **Unlimited** steps for complex long-running operations.
 - **Desktop Integration**: Use the `manage.sh` tool to create a native macOS `.app` bundle with a custom OCODX icon.
 - **Security First**: Every action—from writing a file to pushing a commit—requires your explicit confirmation in the UI.
 

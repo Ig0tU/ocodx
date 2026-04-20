@@ -8,6 +8,7 @@ to fulfill the user's request, then signals completion with DONE.
 import json
 import re
 import os
+import itertools
 import subprocess
 from typing import Callable, Generator
 
@@ -157,7 +158,7 @@ class CodingAgent:
         """
         self.llm_caller = llm_caller
 
-    def run(self, prompt: str, project_dir: str) -> Generator[dict, None, None]:
+    def run(self, prompt: str, project_dir: str, max_steps: int = None) -> Generator[dict, None, None]:
         """Yield SSE-style event dicts as the agent works."""
         project_dir = os.path.realpath(os.path.abspath(project_dir))
 
@@ -169,7 +170,10 @@ class CodingAgent:
         files_changed: set[str] = set()
         yield {"type": "start", "prompt": prompt}
 
-        for step in range(self.MAX_STEPS):
+        limit = self.MAX_STEPS if max_steps is None else max_steps
+        step_iter = itertools.count() if limit == 0 else range(limit)
+
+        for step in step_iter:
             yield {"type": "thinking"}
 
             try:
@@ -245,7 +249,8 @@ class CodingAgent:
                 yield {"type": "done",    "stats": stats}
                 return
 
-        yield {"type": "error",  "content": f"Reached max steps ({self.MAX_STEPS})"}
+        if limit != 0:
+            yield {"type": "error",  "content": f"Reached max steps ({limit})"}
         yield {"type": "done",   "stats": {"files_changed": sorted(files_changed)}}
 
     # ── Tool dispatcher ───────────────────────────────────────────────────────
