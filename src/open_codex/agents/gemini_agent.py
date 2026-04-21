@@ -63,17 +63,77 @@ class GeminiAgent(LLMAgent):
 
     def health(self) -> dict:
         if not self.api_key:
-            return {"ok": False, "hint": "GEMINI_API_KEY not set. Add it in Settings."}
+            return {"ok": False, "hint": "GEMINI_API_KEY not set. Add it in Settings (⚙)."}
         try:
             client = self._client()
-            names = [
-                m.name.replace("models/", "")
-                for m in client.models.list()
-                if m.name and "gemini" in m.name
+
+            # 1. Fetch all models available to this key
+            all_models = list(client.models.list())
+
+            text_models  = []   # support generateContent → active ping
+            media_models = []   # Imagen/Veo/Lyria/embeddings → presence-check only
+
+            for m in all_models:
+                methods = getattr(m, "supported_generation_methods", None) or []
+                name    = (m.name or "").replace("models/", "")
+                if "generateContent" in methods:
+                    text_models.append(name)
+                else:
+                    media_models.append(name)
+
+            # 2. Active 1-token ping on the configured model (or best available)
+            ping_target = self.model_name if self.model_name in text_models else (
+                next((n for n in text_models if "gemini-2" in n or "gemini-3" in n), None)
+                or (text_models[0] if text_models else None)
+            )
+
+            ping_ok    = False
+            ping_hint  = None
+            if ping_target:
+                try:
+                    from google.genai import types as _types
+                    resp = client.models.generate_content(
+                        model=ping_target,
+                        contents="Ping. Reply with 'Pong'.",
+                        config=_types.GenerateContentConfig(
+                            max_output_tokens=5,
+                            temperature=0.0,
+                        ),
+                    )
+                    ping_ok   = bool(resp.text)
+                    ping_hint = None
+                except Exception as e:
+                    ping_ok   = False
+                    ping_hint = _gemini_user_error(e)
+            else:
+                ping_hint = "No generateContent model available on this key."
+
+            # 3. Identify accessible media models (presence-check)
+            _media_kw   = ("imagen", "veo", "lyria", "embedding")
+            media_active = [
+                m for m in media_models
+                if any(kw in m.lower() for kw in _media_kw)
             ]
-            return {"ok": True, "models": names[:10], "hint": None}
+
+            # 4. Surface model lists
+            modern_families = ("gemini-2", "gemini-3", "gemini-exp",
+                               "gemini-2.5", "gemini-flash", "gemini-pro")
+            modern_text = [
+                n for n in text_models
+                if any(f in n for f in modern_families)
+            ]
+
+            return {
+                "ok":           ping_ok,
+                "ping_model":   ping_target,
+                "models":       modern_text[:15],
+                "media_models": media_active,
+                "hint":         ping_hint,
+            }
+
         except Exception as e:
             return {"ok": False, "hint": _gemini_user_error(e)}
+
 
     def _generate_completion(self, messages: List[Dict[str, str]]) -> str:
         if not self.api_key:
