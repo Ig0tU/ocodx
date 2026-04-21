@@ -232,6 +232,37 @@ def _call_ai(prompt: str, config: dict) -> str:
                 config.get("GEMINI_MODEL") or "gemini-2.0-flash")
             return m.generate_content(prompt).text.strip()
 
+        elif provider in ("anthropic", "claude"):
+            import anthropic as _ant
+            api_key = (config.get("ANTHROPIC_API_KEY")
+                       or os.getenv("ANTHROPIC_API_KEY", ""))
+            model = (config.get("ANTHROPIC_MODEL")
+                     or os.getenv("ANTHROPIC_MODEL")
+                     or "claude-haiku-4-5-20251001")
+            client = _ant.Anthropic(api_key=api_key)
+            resp = client.messages.create(
+                model=model,
+                max_tokens=1200,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return resp.content[0].text.strip()
+
+        elif provider == "openai":
+            import openai as _oai
+            api_key = (config.get("OPENAI_API_KEY")
+                       or os.getenv("OPENAI_API_KEY", ""))
+            model = (config.get("OPENAI_MODEL")
+                     or os.getenv("OPENAI_MODEL")
+                     or "gpt-4o-mini")
+            client = _oai.OpenAI(api_key=api_key)
+            resp = client.chat.completions.create(
+                model=model,
+                max_tokens=1200,
+                temperature=0.6,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return resp.choices[0].message.content.strip()
+
         else:
             return ""
     except Exception as e:

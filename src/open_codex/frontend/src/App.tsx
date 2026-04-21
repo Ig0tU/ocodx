@@ -213,8 +213,9 @@ const SLASH_COMMANDS: SlashCmd[] = [
   { cmd: '/push',   desc: 'Push branch to remote origin',           hasArgs: false },
   { cmd: '/pull',   desc: 'Pull latest from remote',                hasArgs: false },
   { cmd: '/clear',  desc: 'Clear current thread',                   hasArgs: false },
-  { cmd: '/phase',  desc: 'Launch a phase — /phase <1-6>',          hasArgs: true  },
+  { cmd: '/phase',  desc: 'Launch a phase — /phase <1-6 | all>',    hasArgs: true  },
   { cmd: '/agent',  desc: 'Activate an agent — /agent <name>',      hasArgs: true  },
+  { cmd: '/auto',   desc: 'Run automation — /auto <name>',           hasArgs: true  },
 ]
 
 interface ProviderHealth {
@@ -555,6 +556,12 @@ export default function App() {
 
   // SLM Phases
   const [slmPhases, setSlmPhases] = useState<SLMPhase[]>([])
+  const [phaseRunStatus, setPhaseRunStatus] = useState<Record<string, 'idle' | 'running' | 'done'>>({})
+  const [phaseAllRunning, setPhaseAllRunning] = useState(false)
+  const phaseAllCancelRef = useRef(false)
+
+  // Automations
+  const [autoSearch, setAutoSearch] = useState('')
 
   // Provider Health
   const [health, setHealth] = useState<Record<string, ProviderHealth>>({})
@@ -908,10 +915,29 @@ export default function App() {
     : slmClusters
 
   // ── Phase launcher ────────────────────────────────────────────────────────
-  function launchPhase(phase: SLMPhase) {
+  async function launchPhase(phase: SLMPhase, opts: { closePanel?: boolean } = {}) {
     if (!activeProject) { alert('Select a project first'); return }
-    setActivePanel(null)
-    sendMessage(phase.prompt)
+    if (opts.closePanel !== false) setActivePanel(null)
+    setPhaseRunStatus(prev => ({ ...prev, [phase.id]: 'running' }))
+    try {
+      await sendMessage(phase.prompt)
+    } finally {
+      setPhaseRunStatus(prev => ({ ...prev, [phase.id]: 'done' }))
+    }
+  }
+
+  async function launchAllPhases() {
+    if (!activeProject) { alert('Select a project first'); return }
+    if (phaseAllRunning) { phaseAllCancelRef.current = true; return }
+    setPhaseAllRunning(true)
+    setPhaseRunStatus({})
+    phaseAllCancelRef.current = false
+    for (const phase of slmPhases) {
+      if (phaseAllCancelRef.current) break
+      await launchPhase(phase, { closePanel: false })
+    }
+    setPhaseAllRunning(false)
+    phaseAllCancelRef.current = false
   }
 
   // ── Slash menu computed values ────────────────────────────────────────────
@@ -1574,13 +1600,40 @@ export default function App() {
         return true
       }
       case '/phase': {
+        if (args.trim().toLowerCase() === 'all') {
+          launchAllPhases()
+          return true
+        }
         const n = parseInt(args)
         const phase = slmPhases.find(p => p.phase_num === n)
         if (!phase) {
-          addLocalMessage(`/phase ${args}`, `Phase "${args}" not found. Available: ${slmPhases.map(p => p.phase_num).join(', ')}`)
+          addLocalMessage(`/phase ${args}`, `Phase "${args}" not found. Available: ${slmPhases.map(p => p.phase_num).join(', ')}, all`)
           return true
         }
         launchPhase(phase)
+        return true
+      }
+      case '/auto': {
+        const q = args.toLowerCase().trim()
+        if (!q) {
+          addLocalMessage('/auto', `Usage: \`/auto <name>\`\n\nAvailable: ${automations.slice(0,6).map(a=>a.name).join(', ')}…`)
+          return true
+        }
+        const auto = automations.find(a =>
+          a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q)
+        )
+        if (!auto) {
+          addLocalMessage(`/auto ${args}`, `No automation found matching "${args}". Try: ${automations.slice(0,5).map(a=>a.name).join(', ')}`)
+          return true
+        }
+        if (auto.browser) {
+          setBrowserTaskInput(auto.task_template ?? auto.description)
+          if (auto.default_url) setBrowserUrl(auto.default_url)
+          setActivePanel('browser')
+        } else {
+          setActivePanel(null)
+          sendMessage(auto.task_template ?? auto.description)
+        }
         return true
       }
       case '/agent': {
@@ -2153,37 +2206,82 @@ export default function App() {
 
       {/* ── Phase Launcher Panel ──────────────────────────────────── */}
       {activePanel === 'phases' && (
-        <aside className="slm-panel phases-panel">
+        <aside className="slm-panel phases-panel" ref={panelRef as React.RefObject<HTMLElement>} style={{ width: sidePanel.size, minWidth: sidePanel.size }}>
           <div className="slm-panel-header">
             <div className="slm-panel-title">
               <span className="slm-panel-icon">◈</span>
               <span>Phase Launcher</span>
-              <span className="slm-count">SLM-v3 Sequences</span>
+              <span className="slm-count">SLM-v3 · {slmPhases.length} phases</span>
             </div>
             <button id="btn-close-phases" className="panel-close" onClick={() => setActivePanel(null)}>✕</button>
           </div>
-          <div className="phases-list">
-            {slmPhases.map(phase => (
-              <div key={phase.id} className="phase-card">
-                <div className="phase-header">
-                  <span className="phase-num">Phase {phase.phase_num}</span>
-                  <span className="phase-name">{phase.name}</span>
-                </div>
-                <div className="phase-desc">{phase.description}</div>
-                <div className="phase-chain">
-                  {phase.chain.map(c => (
-                    <span key={c} className="phase-chip">{c}</span>
-                  ))}
+
+          {/* Run All / Cancel strip */}
+          <div className="phase-run-all-strip">
+            {phaseAllRunning ? (
+              <>
+                <div className="phase-seq-progress">
+                  <div
+                    className="phase-seq-bar"
+                    style={{
+                      width: `${Math.round(
+                        (slmPhases.filter(p => phaseRunStatus[p.id] === 'done').length / slmPhases.length) * 100
+                      )}%`
+                    }}
+                  />
                 </div>
                 <button
-                  id={`launch-phase-${phase.phase_num}`}
-                  className="phase-launch-btn"
-                  onClick={() => launchPhase(phase)}
-                  disabled={!activeProject}>
-                  {activeProject ? `▶ Launch Phase ${phase.phase_num}` : 'Select a project first'}
+                  id="btn-cancel-all-phases"
+                  className="phase-cancel-btn"
+                  onClick={() => { phaseAllCancelRef.current = true }}
+                >
+                  ⏹ Cancel Run
                 </button>
-              </div>
-            ))}
+              </>
+            ) : (
+              <button
+                id="btn-run-all-phases"
+                className="phase-run-all-btn"
+                disabled={!activeProject}
+                onClick={() => launchAllPhases()}
+              >
+                ▶▶ Run All Phases Sequentially
+              </button>
+            )}
+          </div>
+
+          <div className="phases-list">
+            {slmPhases.map(phase => {
+              const status = phaseRunStatus[phase.id] ?? 'idle'
+              return (
+                <div key={phase.id} className={`phase-card phase-card-${status}`}>
+                  <div className="phase-header">
+                    <span className="phase-num">Phase {phase.phase_num}</span>
+                    <span className="phase-name">{phase.name}</span>
+                    <span className="phase-status-dot">
+                      {status === 'running' && <span className="phase-spinner" />}
+                      {status === 'done'    && <span className="phase-done-check">✓</span>}
+                    </span>
+                  </div>
+                  <div className="phase-desc">{phase.description}</div>
+                  <div className="phase-chain">
+                    {phase.chain.map(c => (
+                      <span key={c} className={`phase-chip ${status === 'running' ? 'phase-chip-active' : ''}`}>{c}</span>
+                    ))}
+                  </div>
+                  <button
+                    id={`launch-phase-${phase.phase_num}`}
+                    className={`phase-launch-btn ${status === 'running' ? 'running' : ''} ${status === 'done' ? 'done' : ''}`}
+                    onClick={() => launchPhase(phase)}
+                    disabled={!activeProject || status === 'running' || phaseAllRunning}>
+                    {status === 'running' ? '⟳ Running…'
+                      : status === 'done' ? '✓ Completed — Re-run'
+                      : activeProject ? `▶ Launch Phase ${phase.phase_num}`
+                      : 'Select a project first'}
+                  </button>
+                </div>
+              )
+            })}
           </div>
         </aside>
       )}
@@ -3025,6 +3123,18 @@ export default function App() {
             </div>
             <button className="panel-close" onClick={() => setActivePanel(null)}>✕</button>
           </div>
+
+          {/* Search */}
+          <div className="auto-search-wrap">
+            <input
+              className="auto-search-input"
+              placeholder="Search automations…"
+              value={autoSearch}
+              onChange={e => setAutoSearch(e.target.value)}
+            />
+            {autoSearch && <button className="auto-search-clear" onClick={() => setAutoSearch('')}>✕</button>}
+          </div>
+
           <div className="auto-category-bar">
             {['All', ...Array.from(new Set(automations.map(a => a.category)))].map(cat => (
               <button key={cat}
@@ -3035,34 +3145,89 @@ export default function App() {
             ))}
           </div>
           <div className="auto-list">
-            {automations.filter(a => automationCategory === 'All' || a.category === automationCategory).map(auto => (
-              <div key={auto.id} className="auto-card">
-                <div className="auto-card-header">
-                  <span className="auto-icon">{auto.icon}</span>
-                  <div className="auto-info">
-                    <span className="auto-name">{auto.name}</span>
-                    <span className="auto-cat">{auto.category}</span>
+            {automations
+              .filter(a => automationCategory === 'All' || a.category === automationCategory)
+              .filter(a => !autoSearch || a.name.toLowerCase().includes(autoSearch.toLowerCase()) || a.description.toLowerCase().includes(autoSearch.toLowerCase()))
+              .map(auto => {
+                const isExpanded = selectedAutomation?.id === auto.id
+                return (
+                  <div key={auto.id} className={`auto-card ${isExpanded ? 'expanded' : ''}`}>
+                    <div className="auto-card-header">
+                      <span className="auto-icon">{auto.icon}</span>
+                      <div className="auto-info">
+                        <span className="auto-name">{auto.name}</span>
+                        <span className="auto-cat">{auto.category}</span>
+                      </div>
+                      {auto.browser ? (
+                        <button
+                          id={`run-auto-${auto.id}`}
+                          className="auto-run-btn browser"
+                          disabled={!activeProject}
+                          onClick={() => {
+                            if (isExpanded) {
+                              setSelectedAutomation(null)
+                              setAutomationTaskInput('')
+                              setAutomationUrlInput('')
+                            } else {
+                              setSelectedAutomation(auto)
+                              setAutomationTaskInput('')
+                              setAutomationUrlInput(auto.default_url ?? '')
+                            }
+                          }}>
+                          {isExpanded ? '▲ Collapse' : '🌐 Configure'}
+                        </button>
+                      ) : (
+                        <button
+                          id={`run-auto-${auto.id}`}
+                          className="auto-run-btn"
+                          disabled={!activeProject}
+                          onClick={() => {
+                            setActivePanel(null)
+                            sendMessage(auto.task_template ?? auto.description)
+                          }}>
+                          ▶ Run
+                        </button>
+                      )}
+                    </div>
+                    <div className="auto-desc">{auto.description}</div>
+
+                    {/* Inline browser task configurator */}
+                    {isExpanded && (
+                      <div className="auto-expand">
+                        <textarea
+                          className="auto-expand-ta"
+                          placeholder="Describe your specific target, topic, or URL…"
+                          rows={3}
+                          value={automationTaskInput}
+                          onChange={e => setAutomationTaskInput(e.target.value)}
+                        />
+                        <input
+                          className="auto-expand-url"
+                          placeholder={auto.default_url ?? 'Starting URL (optional)'}
+                          value={automationUrlInput}
+                          onChange={e => setAutomationUrlInput(e.target.value)}
+                        />
+                        <button
+                          className="auto-launch-btn"
+                          disabled={!activeProject}
+                          onClick={() => {
+                            const fullTask = automationTaskInput.trim()
+                              ? (auto.task_template ?? '') + automationTaskInput.trim()
+                              : (auto.task_template ?? auto.description)
+                            setBrowserTaskInput(fullTask)
+                            setBrowserUrl(automationUrlInput || auto.default_url || '')
+                            setSelectedAutomation(null)
+                            setAutomationTaskInput('')
+                            setAutomationUrlInput('')
+                            setActivePanel('browser')
+                          }}>
+                          ▶ Launch Browser Agent
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  <button
-                    id={`run-auto-${auto.id}`}
-                    className={`auto-run-btn ${auto.browser ? 'browser' : ''}`}
-                    disabled={!activeProject}
-                    onClick={() => {
-                      if (auto.browser) {
-                        setBrowserTaskInput(auto.task_template ?? auto.description)
-                        if (auto.default_url) setBrowserUrl(auto.default_url)
-                        setActivePanel('browser')
-                      } else {
-                        setActivePanel(null)
-                        sendMessage(auto.task_template ?? auto.description)
-                      }
-                    }}>
-                    {auto.browser ? '🌐 Browse' : '▶ Run'}
-                  </button>
-                </div>
-                <div className="auto-desc">{auto.description}</div>
-              </div>
-            ))}
+                )
+              })}
           </div>
         </aside>
       )}

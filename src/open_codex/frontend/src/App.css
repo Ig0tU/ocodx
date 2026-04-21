@@ -695,6 +695,196 @@
   box-shadow: 0 0 16px rgba(139, 92, 246, 0.2);
 }
 .phase-launch-btn:disabled { opacity: 0.4; cursor: default; }
+.phase-launch-btn.running {
+  background: rgba(234, 179, 8, 0.12);
+  color: hsl(48 96% 60%);
+  border-color: rgba(234, 179, 8, 0.3);
+  animation: phase-btn-pulse 1.4s ease-in-out infinite;
+}
+.phase-launch-btn.done {
+  background: rgba(34, 197, 94, 0.1);
+  color: hsl(142 70% 55%);
+  border-color: rgba(34, 197, 94, 0.25);
+}
+@keyframes phase-btn-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.55; }
+}
+
+/* Phase card states */
+.phase-card-running {
+  border-color: rgba(234, 179, 8, 0.4) !important;
+  box-shadow: 0 0 14px rgba(234, 179, 8, 0.12);
+}
+.phase-card-done {
+  border-color: rgba(34, 197, 94, 0.3) !important;
+}
+
+/* Phase status dot */
+.phase-status-dot { margin-left: auto; display: flex; align-items: center; }
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.phase-spinner {
+  display: inline-block;
+  width: 13px; height: 13px;
+  border: 2px solid rgba(234, 179, 8, 0.3);
+  border-top-color: hsl(48 96% 60%);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+
+.phase-done-check {
+  font-size: 13px;
+  color: hsl(142 70% 55%);
+  font-weight: 700;
+}
+
+/* Active chip highlight */
+.phase-chip-active {
+  background: rgba(139, 92, 246, 0.15) !important;
+  border-color: rgba(139, 92, 246, 0.4) !important;
+  color: var(--accent) !important;
+}
+
+/* Run All strip */
+.phase-run-all-strip {
+  padding: 8px 10px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.phase-run-all-btn {
+  width: 100%;
+  padding: 9px 14px;
+  background: rgba(139, 92, 246, 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  transition: all 0.15s;
+}
+.phase-run-all-btn:hover:not(:disabled) {
+  background: rgba(139, 92, 246, 0.25);
+  box-shadow: 0 0 18px rgba(139, 92, 246, 0.25);
+}
+.phase-run-all-btn:disabled { opacity: 0.35; cursor: default; }
+
+.phase-cancel-btn {
+  width: 100%;
+  padding: 9px 14px;
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  transition: all 0.15s;
+}
+.phase-cancel-btn:hover { background: rgba(239, 68, 68, 0.18); }
+
+/* Phase sequence progress bar */
+.phase-seq-progress {
+  height: 4px;
+  background: var(--bg-4);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.phase-seq-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), hsl(270 80% 70%));
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+/* ── Automations search ───────────────────────────── */
+.auto-search-wrap {
+  position: relative;
+  padding: 6px 10px 2px;
+}
+.auto-search-input {
+  width: 100%;
+  padding: 7px 28px 7px 10px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+.auto-search-input:focus { border-color: var(--accent); }
+.auto-search-input::placeholder { color: var(--text-3); }
+.auto-search-clear {
+  position: absolute;
+  right: 18px; top: 50%;
+  transform: translateY(-50%);
+  background: none; border: none;
+  color: var(--text-3); cursor: pointer;
+  font-size: 11px; padding: 2px 4px;
+}
+.auto-search-clear:hover { color: var(--text); }
+
+/* Expanded auto card */
+.auto-card.expanded {
+  border-color: rgba(139, 92, 246, 0.3);
+}
+.auto-expand {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.auto-expand-ta {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-4);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 12px;
+  resize: none;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+  font-family: inherit;
+}
+.auto-expand-ta:focus { border-color: var(--accent); }
+.auto-expand-ta::placeholder { color: var(--text-3); }
+.auto-expand-url {
+  width: 100%;
+  padding: 7px 10px;
+  background: var(--bg-4);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+.auto-expand-url:focus { border-color: var(--accent); }
+.auto-expand-url::placeholder { color: var(--text-3); }
+.auto-launch-btn {
+  padding: 9px 14px;
+  background: rgba(59, 130, 246, 0.12);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  transition: all 0.15s;
+}
+.auto-launch-btn:hover:not(:disabled) { background: rgba(59, 130, 246, 0.22); }
+.auto-launch-btn:disabled { opacity: 0.4; cursor: default; }
 
 /* Health panel */
 .health-panel .health-list {
@@ -3129,6 +3319,36 @@ details[open] .steps-chevron { transform: rotate(90deg); }
   color: var(--accent);
   border-color: hsl(183 68% 38% / .3);
 }
+[data-theme="light"] .auto-search-input {
+  background: var(--bg-3);
+  border-color: var(--border);
+  color: var(--text);
+}
+[data-theme="light"] .auto-card.expanded { border-color: var(--accent); }
+[data-theme="light"] .auto-expand-ta,
+[data-theme="light"] .auto-expand-url {
+  background: var(--bg-3);
+  border-color: var(--border);
+  color: var(--text);
+}
+[data-theme="light"] .auto-launch-btn {
+  background: hsl(217 91% 60% / .1);
+  color: hsl(217 91% 45%);
+  border-color: hsl(217 91% 60% / .25);
+}
+[data-theme="light"] .auto-launch-btn:hover:not(:disabled) { background: hsl(217 91% 60% / .18); }
+
+/* ── Phase Launcher (light) ─────────────────────────────────────── */
+[data-theme="light"] .phase-card { background: var(--bg-surface); border-color: var(--border); }
+[data-theme="light"] .phase-card-running { border-color: rgba(202,138,4,.45) !important; }
+[data-theme="light"] .phase-card-done   { border-color: rgba(22,163,74,.35) !important; }
+[data-theme="light"] .phase-run-all-btn {
+  background: hsl(183 68% 38% / .1);
+  color: var(--accent);
+  border-color: hsl(183 68% 38% / .3);
+}
+[data-theme="light"] .phase-run-all-btn:hover:not(:disabled) { background: hsl(183 68% 38% / .18); }
+[data-theme="light"] .phase-num { color: var(--accent); }
 
 /* ── Chat / message events (ev-*) ───────────────────────────────── */
 [data-theme="light"] .ev-tool {
