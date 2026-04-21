@@ -131,7 +131,7 @@ interface AgentEvent {
   type: 'start' | 'thinking' | 'thinking_text' | 'tool_call' | 'tool_result'
        | 'file_changed' | 'message' | 'done' | 'error' | 'stream_id' | 'aborted'
        | 'gym_agent_forged'
-       | 'team_decomposing' | 'team_plan' | 'team_start' | 'team_done'
+       | 'team_decomposing' | 'team_plan' | 'team_plan_extend' | 'team_start' | 'team_done'
        | 'team_collab' | 'team_finish'
   content?: string
   tool?: string
@@ -154,6 +154,7 @@ interface AgentEvent {
   msg?: string
   summary?: string
   task?: string
+  new_agents?: [string, string][]
 }
 
 interface Message {
@@ -532,6 +533,7 @@ export default function App() {
   const [browserStep, setBrowserStep] = useState(0)
   const [browserDone, setBrowserDone] = useState<string | null>(null)
   const [browserTaskInput, setBrowserTaskInput] = useState('')
+  const [browserPriorContext, setBrowserPriorContext] = useState<string | null>(null)
   const browserLogRef = useRef<HTMLDivElement>(null)
 
   // MCP Hub
@@ -750,10 +752,6 @@ export default function App() {
 
   // ── Fetch models ──────────────────────────────────────────────────────────
   const fetchModels = useCallback(async () => {
-    if (agentType === 'ollama_cloud') {
-      setModels(['qwen3-coder:480b-cloud', 'deepseek-v3.1:671b-cloud', 'qwen3.5:latest-cloud', 'ministral-3:latest-cloud'])
-      return
-    }
     if (agentType === 'gemini') {
       setModels(['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'])
       return
@@ -764,7 +762,9 @@ export default function App() {
     }
     setModelsLoading(true)
     try {
-      const host = agentType === 'lmstudio' ? lmHost : ollamaHost
+      const host = agentType === 'lmstudio' ? lmHost
+        : agentType === 'ollama_cloud' ? 'https://ollama.com'
+        : ollamaHost
       const r = await fetch(`/api/models?source=${agentType}&host=${encodeURIComponent(host)}`)
       const d = await r.json()
       setModels(d.models ?? [])
@@ -1214,6 +1214,7 @@ export default function App() {
           start_url: browserUrl || null,
           headless: false,
           project_dir: activeProject?.path || null,
+          prior_context: browserPriorContext || null,
         }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -1245,7 +1246,9 @@ export default function App() {
           } else if (ev.type === 'log') {
             setBrowserLogs(prev => [...prev, ev])
           } else if (ev.type === 'done') {
-            setBrowserDone(ev.summary ?? ev.content ?? 'Task completed.')
+            const summary = ev.summary ?? ev.content ?? 'Task completed.'
+            setBrowserDone(summary)
+            setBrowserPriorContext(summary)
           } else if (ev.type === 'error') {
             setBrowserLogs(prev => [...prev, ev])
           }
@@ -1773,20 +1776,30 @@ export default function App() {
         return ev.content
           ? <div key={i} className="ev-thinking-text">💭 {ev.content}</div>
           : null
-      case 'tool_call':
+      case 'tool_call': {
+        const argStr = ev.args ? JSON.stringify(ev.args, null, 2) : null
+        const argPreview = renderArgs(ev.tool, ev.args)
         return (
-          <details key={i} className="ev-tool">
+          <details key={i} className="ev-tool" open>
             <summary>
               <span className="ev-tool-icon">{toolIcon(ev.tool)}</span>
               <span className="ev-tool-name">{ev.tool}</span>
-              {ev.args && <span className="ev-tool-args">{renderArgs(ev.tool, ev.args)}</span>}
+              {argPreview && <span className="ev-tool-args">{argPreview}</span>}
             </summary>
+            {argStr && (
+              <pre className="ev-tool-body">{argStr}</pre>
+            )}
           </details>
         )
+      }
       case 'tool_result':
         return (
-          <details key={i} className="ev-result">
-            <summary>Result from {ev.tool}</summary>
+          <details key={i} className="ev-result" open={!!ev.result && ev.result.length < 500}>
+            <summary>
+              <span className="ev-result-icon">◀</span>
+              <span>Result{ev.tool ? ` · ${ev.tool}` : ''}</span>
+              {ev.result && <span className="ev-result-len">{ev.result.length} chars</span>}
+            </summary>
             <pre className="ev-result-pre">{ev.result}</pre>
           </details>
         )
@@ -1849,23 +1862,68 @@ export default function App() {
             {ev.summary && <span className="ev-team-finish-summary">{ev.summary}</span>}
           </div>
         )
+      case 'team_plan_extend':
+        return (
+          <div key={i} className="ev-team-extend">
+            <span className="ev-team-icon">⬡</span>
+            <span className="ev-team-extend-label">Activating {ev.new_agents?.length ?? 0} additional agent{(ev.new_agents?.length ?? 0) !== 1 ? 's' : ''}:</span>
+            {ev.new_agents?.map(([coord]) => (
+              <span key={coord} className="ev-team-badge ev-team-badge--active">{coord}</span>
+            ))}
+          </div>
+        )
       default: return null
     }
   }
 
   function toolIcon(tool?: string) {
     const map: Record<string, string> = {
-      list_directory: '📂', read_file: '📄', write_file: '✏️',
-      run_command: '⚡', search_files: '🔍', create_file: '🆕',
+      // file ops
+      list_directory: '📂', read_file: '📄', write_file: '✏️', create_file: '🆕',
+      edit_file: '✏️', delete_file: '🗑️', move_file: '📦', copy_file: '📋',
+      // search
+      search_files: '🔍', grep: '🔍', find_files: '🔍', glob: '🔍',
+      // execution
+      run_command: '⚡', bash: '⚡', shell: '⚡', execute: '⚡',
+      // web / network
+      web_search: '🌐', web_fetch: '🌐', fetch: '🌐', http: '🌐',
+      browser: '🌐', navigate: '🌐',
+      // code / analysis
+      analyze: '🔬', lint: '🔬', typecheck: '🔬',
+      // git
+      git: '⚛️', git_diff: '⚛️', git_log: '⚛️', git_commit: '⚛️',
+      // data / AI
+      think: '💭', plan: '📐', summarize: '📝',
+      // agents
+      dispatch_agent: '⬡', spawn: '⬡', delegate: '⬡',
+      // claude code specific
+      Read: '📄', Write: '✏️', Edit: '✏️', Bash: '⚡', Glob: '📂',
+      Grep: '🔍', WebFetch: '🌐', WebSearch: '🌐', Agent: '⬡',
+      Task: '📐', TodoWrite: '📝', TodoRead: '📝',
     }
     return tool ? (map[tool] ?? '🔧') : '🔧'
   }
 
-  function renderArgs(tool?: string, args?: Record<string, unknown>) {
+  function renderArgs(tool?: string, args?: Record<string, unknown>): string {
     if (!args) return ''
-    if (tool === 'write_file' || tool === 'create_file') return args.path as string
-    if (tool === 'run_command') return args.command as string
-    return Object.values(args).join(' ')
+    const t = tool?.toLowerCase() ?? ''
+    if (t === 'write_file' || t === 'create_file' || t === 'edit_file'
+        || t === 'read_file' || t === 'delete_file' || t === 'write' || t === 'read' || t === 'edit')
+      return String(args.path ?? args.file_path ?? '')
+    if (t === 'run_command' || t === 'bash' || t === 'shell' || t === 'execute')
+      return String(args.command ?? args.cmd ?? '').slice(0, 120)
+    if (t === 'search_files' || t === 'grep')
+      return String(args.pattern ?? args.query ?? args.search ?? '').slice(0, 80)
+    if (t === 'web_search' || t === 'websearch')
+      return String(args.query ?? args.q ?? '').slice(0, 80)
+    if (t === 'web_fetch' || t === 'webfetch' || t === 'fetch')
+      return String(args.url ?? '').slice(0, 80)
+    if (t === 'glob' || t === 'list_directory' || t === 'find_files')
+      return String(args.pattern ?? args.path ?? '').slice(0, 80)
+    if (t === 'agent' || t === 'dispatch_agent')
+      return String(args.prompt ?? args.task ?? '').slice(0, 80)
+    const first = Object.values(args)[0]
+    return first ? String(first).slice(0, 80) : ''
   }
 
   const hasChanges = (gitStats?.added ?? 0) + (gitStats?.removed ?? 0) > 0
@@ -3244,6 +3302,16 @@ export default function App() {
             <button className="panel-close" onClick={() => setActivePanel(null)}>✕</button>
           </div>
 
+          {/* Prior context carry-over indicator */}
+          {browserPriorContext && !browserRunning && (
+            <div className="browser-prior-ctx">
+              <span className="browser-prior-icon">↺</span>
+              <span className="browser-prior-label">Continuing session:</span>
+              <span className="browser-prior-summary">{browserPriorContext.slice(0, 120)}{browserPriorContext.length > 120 ? '…' : ''}</span>
+              <button className="browser-prior-clear" onClick={() => setBrowserPriorContext(null)} title="Clear session context">✕</button>
+            </div>
+          )}
+
           <div className="browser-config">
             <textarea
               id="browser-task-input"
@@ -3270,7 +3338,7 @@ export default function App() {
               ) : (
                 <button id="btn-browser-run" className="browser-run-btn"
                   onClick={runBrowserTask} disabled={!browserTaskInput.trim()}>
-                  ▶ Launch Browser Agent
+                  {browserPriorContext ? '↺ Continue Session' : '▶ Launch Browser Agent'}
                 </button>
               )}
               {browserRunning && (
@@ -3484,14 +3552,14 @@ export default function App() {
                             )
                           }
                           return (
-                            <details className="steps-group" open={false}>
+                            <details className="steps-group" open={!msg.done}>
                               <summary className="steps-summary">
                                 {!msg.done ? (
                                   <><span className="thinking-spinner steps-spinner" /><span className="steps-label">Working…</span></>
                                 ) : (
                                   <>
                                     <span className="steps-chevron">▶</span>
-                                    <span className="steps-label">{msg.events.filter(e => e.type === 'tool_call').length} steps</span>
+                                    <span className="steps-label">{msg.events.filter(e => e.type === 'tool_call').length} step{msg.events.filter(e => e.type === 'tool_call').length !== 1 ? 's' : ''}</span>
                                     {msg.events.filter(e => e.type === 'file_changed').length > 0 && (
                                       <span className="steps-files">· {msg.events.filter(e => e.type === 'file_changed').length} file{msg.events.filter(e => e.type === 'file_changed').length !== 1 ? 's' : ''} changed</span>
                                     )}

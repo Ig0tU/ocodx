@@ -31,6 +31,9 @@ BROWSER ACTIONS (pick exactly one per response):
 goto        Navigate to a URL
   BROWSER_ACTION: {"action": "goto", "url": "https://example.com"}
 
+back        Navigate browser history back one page
+  BROWSER_ACTION: {"action": "back"}
+
 click       Click an element by CSS selector
   BROWSER_ACTION: {"action": "click", "selector": "button.submit"}
 
@@ -50,11 +53,17 @@ screenshot  Take a screenshot (you always get one after every action automatical
 extract     Extract text or attribute from an element
   BROWSER_ACTION: {"action": "extract", "selector": "main", "attr": "innerText"}
 
+extract_all Extract text from all matching elements (returns list)
+  BROWSER_ACTION: {"action": "extract_all", "selector": "a.result-title"}
+
 key         Press a keyboard key
   BROWSER_ACTION: {"action": "key", "key": "Enter"}
 
 hover       Hover over an element
   BROWSER_ACTION: {"action": "hover", "selector": ".menu-item"}
+
+focus       Focus an element (useful before typing)
+  BROWSER_ACTION: {"action": "focus", "selector": "input[name='q']"}
 
 select      Select option in a <select> dropdown
   BROWSER_ACTION: {"action": "select", "selector": "select#lang", "value": "en"}
@@ -62,46 +71,56 @@ select      Select option in a <select> dropdown
 js          Execute arbitrary JavaScript and return the result
   BROWSER_ACTION: {"action": "js", "script": "document.title"}
 
+dismiss_dialog  Dismiss/accept any open dialog (alert, confirm, prompt)
+  BROWSER_ACTION: {"action": "dismiss_dialog", "accept": true}
+
 DONE        Signal task completion
-  DONE: <concise summary of what was accomplished>
+  DONE: <concise summary of what was accomplished, including key data extracted>
 """
 
 ACTION_RE = re.compile(r'BROWSER_ACTION:\s*(\{.+?\})', re.DOTALL)
 DONE_RE = re.compile(r'^DONE:\s*(.+)', re.MULTILINE | re.DOTALL)
 
-MAX_PAGE_TEXT = 3000  # chars of page text fed to LLM each step
+MAX_PAGE_TEXT = 8000  # chars of page text fed to LLM each step
 MAX_STEPS = 40
 
 
-def _build_browser_system_prompt(task: str) -> str:
+def _build_browser_system_prompt(task: str, prior_context: str | None = None) -> str:
+    prior_section = ""
+    if prior_context:
+        prior_section = f"""
+PRIOR SESSION CONTEXT (continue from here — do NOT repeat work already done):
+{prior_context}
+
+"""
     return f"""You are AIO-NUI — the Autonomous Interaction & Observation Navigation Unit.
-You control a real Chromium browser autonomously to complete tasks for the user.
+You are the world's most capable autonomous web agent, operating as a SLM-v3 AID-09 subagent.
+You control a real Chromium browser and stream every action live to the user watching your work.
 
 CURRENT TASK:
 {task}
-
-You operate as a SLM-v3 AID-09 (Agentic Workflow Architect) subagent.
-Every action you take is streamed live to the user who is watching you work.
-Be methodical, efficient, and decisive. Do not ask for clarification.
-
+{prior_section}
 {BROWSER_TOOLS_DOC}
 
-OBSERVATION FORMAT (provided to you after each action):
+OBSERVATION FORMAT (provided after each action):
 ---
 URL: <current url>
 TITLE: <page title>
-PAGE_TEXT: <visible text excerpt>
-LAST_ACTION_RESULT: <success/error from last action>
+PAGE_TEXT: <visible page text>
+LAST_ACTION_RESULT: <success/error>
 ---
 
-RULES:
-- Output EXACTLY ONE BROWSER_ACTION per response, then wait for OBSERVATION.
-- Always start with a goto action to navigate to the right page.  
-- After extracting the information you need, output DONE with a summary.
-- If something fails, try an alternative approach (different selector, JS, etc.).
-- Be specific with selectors — prefer id/name/placeholder over generic tags.
-- Keep going until the task is fully complete.
-- Format DONE as: DONE: <what was accomplished, including any extracted data>
+STRATEGIC RULES:
+1. PLAN FIRST: Before acting, form a mental model of the fastest path to the goal.
+2. ONE ACTION PER TURN: Output exactly one BROWSER_ACTION, then wait for the observation.
+3. RESILIENT: If an action fails, immediately try an alternative (different selector, JS fallback, different approach).
+4. PREFER SPECIFICITY: Use id > name > data-* > aria-label > text content for selectors.
+5. HANDLE OBSTACLES: If a cookie banner, modal, or CAPTCHA appears, dismiss it first (click accept, press Escape, or use dismiss_dialog).
+6. EXTRACT BEFORE DONE: Always extract the key data or verify the goal before signaling DONE.
+7. NO HALLUCINATION: Only report what you actually observed in PAGE_TEXT or extracted — never invent data.
+8. EFFICIENT: Minimize steps. Combine navigation and extraction intelligently.
+9. JS FALLBACK: When CSS selectors fail, use js action to query the DOM directly.
+10. DONE FORMAT: DONE: <comprehensive summary of what was accomplished and all key data found>
 """
 
 
@@ -137,6 +156,7 @@ class BrowserAgent:
         task: str,
         start_url: Optional[str] = None,
         abort_event: Optional[threading.Event] = None,
+        prior_context: Optional[str] = None,
     ) -> Generator[dict, None, None]:
         """Run the browser agent and yield SSE event dicts."""
         _abort = abort_event or threading.Event()
@@ -147,9 +167,14 @@ class BrowserAgent:
             yield {"type": "error", "content": "Playwright not installed. Run: pip install playwright && playwright install chromium"}
             return
 
+        system_prompt = _build_browser_system_prompt(task, prior_context)
+        init_user = f"Begin the task. Start by navigating to the appropriate page.\nTask: {task}"
+        if prior_context:
+            init_user += f"\n\nNote: You have prior context from a previous session (see system prompt). Build on that work."
+
         messages = [
-            {"role": "system", "content": _build_browser_system_prompt(task)},
-            {"role": "user", "content": f"Begin the task. Start by navigating to the appropriate page.\nTask: {task}"},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": init_user},
         ]
 
         with sync_playwright() as pw:
@@ -272,6 +297,10 @@ class BrowserAgent:
                 page.goto(url, wait_until="domcontentloaded", timeout=20000)
                 return f"Navigated to {page.url}"
 
+            elif action == "back":
+                page.go_back(wait_until="domcontentloaded", timeout=10000)
+                return f"Navigated back to {page.url}"
+
             elif action == "click":
                 sel = action_data["selector"]
                 page.click(sel, timeout=8000)
@@ -312,7 +341,21 @@ class BrowserAgent:
                     text = page.locator(sel).first.inner_text(timeout=6000)
                 else:
                     text = page.locator(sel).first.get_attribute(attr, timeout=6000) or ""
-                return f"Extracted: {text[:500]}"
+                return f"Extracted: {text[:1000]}"
+
+            elif action == "extract_all":
+                sel = action_data.get("selector", "a")
+                attr = action_data.get("attr", "innerText")
+                elements = page.locator(sel).all()
+                results = []
+                for el in elements[:30]:
+                    try:
+                        val = el.inner_text(timeout=2000) if attr == "innerText" else (el.get_attribute(attr, timeout=2000) or "")
+                        if val.strip():
+                            results.append(val.strip())
+                    except Exception:
+                        pass
+                return f"Extracted {len(results)} items: {'; '.join(results[:10])}"
 
             elif action == "key":
                 key = action_data.get("key", "Enter")
@@ -323,6 +366,16 @@ class BrowserAgent:
                 sel = action_data["selector"]
                 page.hover(sel, timeout=6000)
                 return f"Hovered {sel}"
+
+            elif action == "focus":
+                sel = action_data["selector"]
+                page.focus(sel, timeout=6000)
+                return f"Focused {sel}"
+
+            elif action == "dismiss_dialog":
+                accept = action_data.get("accept", True)
+                page.on("dialog", lambda d: d.accept() if accept else d.dismiss())
+                return f"Dialog handler set ({'accept' if accept else 'dismiss'})"
 
             elif action == "select":
                 sel = action_data["selector"]

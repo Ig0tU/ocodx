@@ -1482,8 +1482,24 @@ async def list_models(source: str, host: str = None):
             client = ollama.Client(host=host or "http://localhost:11434")
             return {"models": [m.model for m in client.list().models if m.model]}
         elif source == "ollama_cloud":
-            return {"models": ["qwen3-coder:480b-cloud", "deepseek-v3.1:671b-cloud",
-                               "qwen3.5:latest-cloud", "ministral-3:latest-cloud"]}
+            try:
+                import ollama
+                cloud_host = host or "https://ollama.com"
+                client = ollama.Client(host=cloud_host)
+                cloud_models = [m.model for m in client.list().models if m.model]
+                if cloud_models:
+                    return {"models": sorted(cloud_models)}
+            except Exception:
+                pass
+            # Fallback to known-good cloud model list
+            return {"models": [
+                "qwen3-coder:480b-cloud", "qwen3.5:latest-cloud", "qwen3:235b-a22b-cloud",
+                "deepseek-v3.1:671b-cloud", "deepseek-r2:671b-cloud",
+                "llama4:maverick-cloud", "llama4:scout-cloud", "llama3.3:70b-cloud",
+                "mistral:latest-cloud", "gemma3:27b-cloud", "phi4:cloud",
+                "ministral-3:latest-cloud", "ministral-8:latest-cloud",
+                "command-r-plus:cloud", "command-a:cloud",
+            ]}
         elif source == "gemini":
             return {"models": ["gemini-2.5-pro", "gemini-2.5-flash",
                                "gemini-2.0-flash", "gemini-2.0-flash-lite"]}
@@ -1649,6 +1665,7 @@ class BrowserRunRequest(BaseModel):
     start_url: Optional[str] = None
     headless: bool = False          # False = headed (user can watch the browser live)
     project_dir: Optional[str] = None
+    prior_context: Optional[str] = None  # summary from a previous session for continuity
 
 
 # Active browser sessions: session_id -> abort threading.Event
@@ -1683,6 +1700,7 @@ async def browser_run(req: BrowserRunRequest):
                 task=req.task,
                 start_url=req.start_url,
                 abort_event=abort_event,
+                prior_context=req.prior_context,
             ):
                 if abort_event.is_set():
                     break
