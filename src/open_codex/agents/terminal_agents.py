@@ -61,6 +61,28 @@ TERMINAL_AGENTS: dict[str, dict] = {
     },
 }
 
+# Extra PATH locations to probe when shutil.which() misses a binary
+# (common when the server inherits a stripped PATH on macOS)
+_EXTRA_PATHS = [
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    os.path.expanduser("~/.local/bin"),
+    os.path.expanduser("~/.npm-global/bin"),
+]
+
+
+def _find_binary(name: str) -> str | None:
+    """Find a binary on PATH or in known extra locations."""
+    found = shutil.which(name)
+    if found:
+        return found
+    for base in _EXTRA_PATHS:
+        candidate = os.path.join(base, name)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
 
 # ── Detection ─────────────────────────────────────────────────────────────────
 
@@ -69,7 +91,7 @@ def detect_terminal_agents() -> list[dict]:
     results = []
     for agent_id, info in TERMINAL_AGENTS.items():
         binary = info["binary"]
-        path = shutil.which(binary)
+        path = _find_binary(binary)
         available = path is not None
         authenticated = False
         version = None
@@ -227,10 +249,12 @@ def run_terminal_agent(
         return
 
     binary = info["binary"]
-    label  = info["label"]   # resolve before first use
-    if not shutil.which(binary):
-        yield {"type": "error", "content": f"{label} is not installed (binary: {binary})"}
+    label  = info["label"]
+    resolved = _find_binary(binary)
+    if not resolved:
+        yield {"type": "error", "content": f"{label} not found. Expected binary: {binary}"}
         return
+    binary = resolved  # use full path so Popen finds it even without Homebrew on PATH
 
     # Prepend personalised OCODX-MATRIX header so every agent knows its role
     enriched_prompt = _make_matrix_header(agent_id, label) + prompt

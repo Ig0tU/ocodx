@@ -62,6 +62,18 @@ class AgentBuilder:
             api_key=api_key or "",
         )
 
+    @staticmethod
+    def get_openai_compat_agent(provider: str, model: Optional[str], api_key: Optional[str],
+                                base_url: Optional[str] = None):
+        from open_codex.agents.openai_compat_agent import OpenAICompatAgent
+        return OpenAICompatAgent(
+            system_prompt=AgentBuilder.get_system_prompt(),
+            provider=provider,
+            model_name=model or None,
+            api_key=api_key or "",
+            base_url=base_url or None,
+        )
+
     # ── LLM caller for the coding agent ──────────────────────────────────────
 
     @staticmethod
@@ -74,10 +86,25 @@ class AgentBuilder:
         """
         Return a callable(messages: list[dict]) -> str that the CodingAgent
         can use for its iterative tool loop.
+
+        Supported agent_type values:
+          Local:   phi, lmstudio, ollama, ollama_cloud
+          Google:  gemini
+          OpenAI:  openai
+          Anthropic: anthropic
+          DeepSeek: deepseek
+          Groq:    groq
+          OpenRouter: openrouter
+          Together: together
+          Mistral: mistral
+          xAI:     xai
+          HuggingFace: huggingface
+          Terminal fallbacks: claude_code, gemini_cli, codex, openclaw
         """
+        # ── Local providers ────────────────────────────────────────────────
         if agent_type == "phi":
             from open_codex.agents.phi_4_mini_agent import Phi4MiniAgent
-            phi = Phi4MiniAgent(system_prompt="")  # system injected via messages
+            phi = Phi4MiniAgent(system_prompt="")
 
             def phi_caller(messages: list) -> str:
                 from typing import cast
@@ -90,54 +117,75 @@ class AgentBuilder:
 
             return phi_caller
 
-        elif agent_type == "lmstudio":
+        if agent_type == "lmstudio":
             agent = AgentBuilder.get_lmstudio_agent(model, host or "http://localhost:1234")
             return agent._generate_completion
 
-        elif agent_type in ("ollama", "ollama_cloud"):
-            # NOTE: the Ollama SDK appends /api/chat to the host internally.
-            # _sanitize_ollama_host() strips any trailing /api so the SDK
-            # never builds the double-path /api/api/chat (404).
-            default_host = (
-                "https://ollama.com" if agent_type == "ollama_cloud"
-                else "http://localhost:11434"
-            )
-            default_model = (
-                "llama3.2" if agent_type == "ollama" else "qwen3-coder:480b-cloud"
-            )
-            raw_host = host or default_host
+        if agent_type in ("ollama", "ollama_cloud"):
+            default_host  = "https://ollama.com" if agent_type == "ollama_cloud" else "http://localhost:11434"
+            default_model = "qwen3-coder:480b-cloud" if agent_type == "ollama_cloud" else "llama3.2"
             agent = AgentBuilder.get_ollama_agent(
                 model or default_model,
-                _sanitize_ollama_host(raw_host),
+                _sanitize_ollama_host(host or default_host),
                 api_key,
             )
             return agent._generate_completion
 
-        elif agent_type == "gemini":
+        if agent_type == "gemini":
             agent = AgentBuilder.get_gemini_agent(model, api_key)
             return agent._generate_completion
 
-        # ── Terminal / CLI agent types → remap to underlying LLM provider ──
-        # These types are valid UI selections (claude_code, gemini_cli, codex,
-        # openclaw, gym_instructor) but they don't carry their own LLM caller.
-        # Fall back gracefully: prefer whatever provider the caller supplied
-        # via host/model hints, defaulting to ollama.
-        terminal_types = {"claude_code", "gemini_cli", "codex", "openclaw", "gym_instructor"}
-        if agent_type in terminal_types:
-            # If a Gemini API key was supplied, use Gemini
-            if api_key and agent_type in ("gemini_cli",):
-                agent = AgentBuilder.get_gemini_agent(model, api_key)
-                return agent._generate_completion
-            # Otherwise default to ollama (local, zero-config)
-            raw_host = host or "http://localhost:11434"
-            agent = AgentBuilder.get_ollama_agent(
-                model or "llama3.2",
-                _sanitize_ollama_host(raw_host),
-                api_key,
-            )
+        # ── OpenAI-compatible cloud providers ──────────────────────────────
+        _COMPAT_PROVIDERS = {
+            "openai", "deepseek", "groq", "openrouter",
+            "together", "mistral", "xai", "huggingface", "anthropic",
+        }
+        if agent_type in _COMPAT_PROVIDERS:
+            # anthropic uses their OpenAI-compat endpoint
+            base_url = None
+            if agent_type == "anthropic":
+                base_url = "https://api.anthropic.com/v1"
+            agent = AgentBuilder.get_openai_compat_agent(agent_type, model, api_key, base_url)
             return agent._generate_completion
 
-        raise ValueError(f"Unknown agent type: {agent_type}")
+        # ── Custom OpenAI-compat base URL ──────────────────────────────────
+        if agent_type == "openai_compat" and host:
+            agent = AgentBuilder.get_openai_compat_agent("openai_compat", model, api_key, host)
+            return agent._generate_completion
+
+        # ── Terminal / CLI agent fallbacks ─────────────────────────────────
+        # These are UI-selectable types that normally run as CLI processes.
+        # If the binary is available, the API routes them through run_terminal_agent.
+        # Here we provide an LLM caller fallback for CodingAgent mode.
+        if agent_type == "claude_code":
+            # Falls back to Anthropic API if key set, else Ollama
+            if api_key:
+                agent = AgentBuilder.get_openai_compat_agent("anthropic", model or "claude-3-5-sonnet-20241022", api_key)
+                return agent._generate_completion
+
+        if agent_type in ("gemini_cli", "openclaw"):
+            if api_key and agent_type == "gemini_cli":
+                agent = AgentBuilder.get_gemini_agent(model, api_key)
+                return agent._generate_completion
+            if api_key and agent_type == "openclaw":
+                # OpenClaw uses Anthropic/Claude under the hood
+                agent = AgentBuilder.get_openai_compat_agent("anthropic", model or "claude-3-5-sonnet-20241022", api_key)
+                return agent._generate_completion
+
+        if agent_type in ("codex",):
+            if api_key:
+                agent = AgentBuilder.get_openai_compat_agent("openai", model or "gpt-4o-mini", api_key)
+                return agent._generate_completion
+
+        # Final fallback: local Ollama
+        raw_host = host or "http://localhost:11434"
+        agent = AgentBuilder.get_ollama_agent(
+            model or "llama3.2",
+            _sanitize_ollama_host(raw_host),
+            api_key,
+        )
+        return agent._generate_completion
+
 
     @staticmethod
     def read_file(file_path: str) -> str:

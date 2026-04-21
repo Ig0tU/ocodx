@@ -1271,9 +1271,7 @@ async def chat_stream(req: ChatStreamRequest):
             elif req.agent_type == "gym_instructor":
                 # ── SLM Gym Instructor — agent forge + training specialist ──────
                 # req.slm_context carries the underlying provider type ("ollama", "lmstudio", "gemini", …)
-                gym_provider = (req.slm_context or "ollama").strip()
-                if gym_provider not in {"lmstudio", "ollama", "ollama_cloud", "gemini"}:
-                    gym_provider = "ollama"
+                gym_provider = (req.slm_context or "ollama").strip() or "ollama"
                 caller = AgentBuilder.get_llm_caller(
                     gym_provider, req.model, req.host, req.api_key
                 )
@@ -1407,30 +1405,18 @@ async def provider_health(provider: str, host: str = None, api_key: str = None):
     try:
         if provider == "lmstudio":
             from open_codex.agents.lmstudio_agent import LMStudioAgent
-            agent = LMStudioAgent(
-                system_prompt="",
-                host=host or "http://localhost:1234",
-            )
+            agent = LMStudioAgent(system_prompt="", host=host or "http://localhost:1234")
             return agent.health()
 
         elif provider in ("ollama", "ollama_cloud"):
             from open_codex.agents.ollama_agent import OllamaAgent
             from open_codex.agent_builder import _sanitize_ollama_host
-            default_host = (
-                "https://ollama.com" if provider == "ollama_cloud"
-                else "http://localhost:11434"
-            )
-            default_model = (
-                "qwen3-coder:480b-cloud" if provider == "ollama_cloud"
-                else "llama3"
-            )
-            h = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-            import ollama as _ollama
-            raw_host = _sanitize_ollama_host(host or default_host)
+            default_host  = "https://ollama.com" if provider == "ollama_cloud" else "http://localhost:11434"
+            default_model = "qwen3-coder:480b-cloud" if provider == "ollama_cloud" else "llama3"
             agent = OllamaAgent(
                 system_prompt="",
                 model_name=default_model,
-                host=raw_host,
+                host=_sanitize_ollama_host(host or default_host),
                 api_key=api_key,
             )
             return agent.health()
@@ -1448,21 +1434,30 @@ async def provider_health(provider: str, host: str = None, api_key: str = None):
             )
             return agent.health()
 
-        elif provider == "huggingface":
-            token = api_key or os.getenv("HUGGINGFACE_API_TOKEN", "")
-            if not token:
-                return {"ok": False, "hint": "HUGGINGFACE_API_TOKEN not set. Add it in Settings."}
-            try:
-                import urllib.request
-                req = urllib.request.Request(
-                    "https://huggingface.co/api/whoami",
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-                with urllib.request.urlopen(req, timeout=8) as resp:
-                    data = json.loads(resp.read())
-                return {"ok": True, "hint": None, "models": [], "user": data.get("name", "")}
-            except Exception as e:
-                return {"ok": False, "hint": f"HuggingFace API error: {e}"}
+        elif provider in ("openai", "anthropic", "deepseek", "groq",
+                          "openrouter", "together", "mistral", "xai",
+                          "huggingface", "openai_compat"):
+            from open_codex.agents.openai_compat_agent import OpenAICompatAgent, PROVIDER_CONFIGS
+            # Each provider has a known env var fallback
+            _ENV_KEYS = {
+                "openai":      "OPENAI_API_KEY",
+                "anthropic":   "ANTHROPIC_API_KEY",
+                "deepseek":    "DEEPSEEK_API_KEY",
+                "groq":        "GROQ_API_KEY",
+                "openrouter":  "OPENROUTER_API_KEY",
+                "together":    "TOGETHER_API_KEY",
+                "mistral":     "MISTRAL_API_KEY",
+                "xai":         "XAI_API_KEY",
+                "huggingface": "HUGGINGFACE_API_TOKEN",
+            }
+            key = api_key or os.getenv(_ENV_KEYS.get(provider, ""), "")
+            base_url = host or None
+            if provider == "anthropic":
+                base_url = base_url or "https://api.anthropic.com/v1"
+            agent = OpenAICompatAgent(
+                system_prompt="", provider=provider, api_key=key, base_url=base_url
+            )
+            return agent.health()
 
         else:
             return {"ok": False, "hint": f"Unknown provider: {provider}"}
